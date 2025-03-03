@@ -8,6 +8,7 @@
 [![License](https://img.shields.io/badge/license-MIT-yellow.svg)](https://opensource.org/license/mit)
 
 ## TO RUN WITH OPEN SOURCE LLM
+Run Eureka from the root repo directory ``IsaacLabEureka``.
 ```
 OPENROUTER_API_KEY=your_openrouter_key python scripts/train.py
 ```
