@@ -19,7 +19,13 @@ class LLMManager:
     - For the Azure OpenAI API, the environment variables AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY must be set.
     """
 
-    def __init__(self, gpt_model: str, num_suggestions: int, temperature: float, system_prompt: str):
+    def __init__(
+        self,
+        gpt_model: str,
+        num_suggestions: int,
+        temperature: float,
+        system_prompt: str,
+    ):
         """Initialize the LLMManager
 
         Args:
@@ -36,6 +42,12 @@ class LLMManager:
 
         if "AZURE_OPENAI_API_KEY" in os.environ:
             self._client = openai.AzureOpenAI(api_version="2024-02-01")
+        elif "OPENROUTER_API_KEY" in os.environ:
+            self._client = openai.OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=os.environ.get("OPENROUTER_API_KEY")
+            )
+            self._gpt_model = "google/gemini-2.0-pro-exp-02-05:free"
         elif "OPENAI_API_KEY" in os.environ:
             self._client = openai.OpenAI()
         else:
@@ -92,5 +104,7 @@ class LLMManager:
             raise RuntimeError("An error occurred while prompting the LLM") from e
 
         raw_outputs = [response.message.content for response in responses.choices]
-        reward_strings = [self.extract_code_from_response(raw_output) for raw_output in raw_outputs]
+        reward_strings = [
+            self.extract_code_from_response(raw_output) for raw_output in raw_outputs
+        ]
         return {"reward_strings": reward_strings, "raw_outputs": raw_outputs}

@@ -7,6 +7,14 @@
 [![Windows platform](https://img.shields.io/badge/platform-windows--64-orange.svg)](https://www.microsoft.com/en-us/)
 [![License](https://img.shields.io/badge/license-MIT-yellow.svg)](https://opensource.org/license/mit)
 
+## TO RUN WITH OPEN SOURCE LLM
+```
+OPENROUTER_API_KEY=your_openrouter_key python scripts/train.py
+```
+and add other arguments such as --task, --max_training_iterations, --rl_library.
+
+It uses "google/gemini-2.0-pro-exp-02-05:free" model from [openrouter](https://openrouter.ai/models?max_price=0).
+
 ## Overview
 
 This repository is an implementation of *[Eureka](https://github.com/eureka-research/Eureka): Human-Level Reward Design via Coding Large Language Models* in Isaac Lab.
