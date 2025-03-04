@@ -7,14 +7,40 @@
 [![Windows platform](https://img.shields.io/badge/platform-windows--64-orange.svg)](https://www.microsoft.com/en-us/)
 [![License](https://img.shields.io/badge/license-MIT-yellow.svg)](https://opensource.org/license/mit)
 
-## TO RUN WITH OPEN SOURCE LLM
-Run Eureka from the root repo directory ``IsaacLabEureka``.
-```
-OPENROUTER_API_KEY=your_openrouter_key python scripts/train.py
-```
-and add other arguments such as --task, --max_training_iterations, --rl_library.
+## FOR SBTC
 
-It uses "google/gemini-2.0-pro-exp-02-05:free" model from [openrouter](https://openrouter.ai/models?max_price=0).
+Go to root repo directory ``/workspace/isaaclab/_isaaclab_eureka``.
+
+- Installation
+    ```
+    isaaclab --python -m pip install -e source/isaaclab_eureka
+    ```
+
+- Train
+
+With open source model "google/gemini-2.0-pro-exp-02-05:free" from [openrouter](https://openrouter.ai/models?max_price=0).
+```
+OPENROUTER_API_KEY=your_openrouter_key isaaclab --python scripts/train.py --task=Isaac-Cartpole-Direct-v0 --max_training_iterations=100 --rl_library="rsl_rl"
+```
+
+With gpt4o from OpenAI (must pay for prompting)
+```
+OPENAI_API_KEY=your_openai_key isaaclab --python scripts/train.py --task=Isaac-Cartpole-Direct-v0 --max_training_iterations=100 --rl_library="rsl_rl"
+```
+
+- Play a Eureka trained policy
+
+For RSL RL, run:
+
+```
+    isaaclab --python scripts/play.py --task=Isaac-Cartpole-Direct-v0 --checkpoint=/path/to/desired/checkpoint.pt --num_envs=20 --rl_library="rsl_rl"
+```
+
+For RL-Games, run:
+
+```
+    isaaclab --python scripts/play.py --task=Isaac-Cartpole-Direct-v0 --checkpoint=/path/to/desired/checkpoint.pth --num_envs=20 --rl_library="rl_games"
+```
 
 ## Overview
 
