@@ -16,31 +16,37 @@ Go to root repo directory ``/workspace/isaaclab/_isaaclab_eureka``.
     isaaclab --python -m pip install -e source/isaaclab_eureka
     ```
 
+
 - Train
 
 With open source model "google/gemini-2.0-pro-exp-02-05:free" from [openrouter](https://openrouter.ai/models?max_price=0).
+
+You can use `rsl_rl`, `rl_games`, `skrl` for `--rl_library`.
 ```
-OPENROUTER_API_KEY=your_openrouter_key isaaclab --python scripts/train.py --task=Isaac-Cartpole-Direct-v0 --max_training_iterations=100 --rl_library="rsl_rl"
+OPENROUTER_API_KEY=your_openrouter_key isaaclab --python scripts/train.py --task=Isaac-Cartpole-Direct-v0 --max_training_iterations=100 --rl_library=your_library
 ```
 
 With gpt4o from OpenAI (must pay for prompting)
 ```
-OPENAI_API_KEY=your_openai_key isaaclab --python scripts/train.py --task=Isaac-Cartpole-Direct-v0 --max_training_iterations=100 --rl_library="rsl_rl"
+OPENAI_API_KEY=your_openai_key isaaclab --python scripts/train.py --task=Isaac-Cartpole-Direct-v0 --max_training_iterations=100 --rl_library=rsl_rl
 ```
+
 
 - Play a Eureka trained policy
 
-For RSL RL, run:
+You can use `rsl_rl`, `rl_games`, `skrl` for `--rl_library`.
+You can give ABSOLUTE PATH TO YOUR CHECKPOINT, 
 
 ```
-    isaaclab --python scripts/play.py --task=Isaac-Cartpole-Direct-v0 --checkpoint=/path/to/desired/checkpoint.pt --num_envs=20 --rl_library="rsl_rl"
+isaaclab --python scripts/play.py --task=Isaac-Cartpole-Direct-v0 --checkpoint=/ABSOLUTE/PATH/TO/YOUR/CHECKPOINT --num_envs=20 --rl_library=your_library
 ```
 
-For RL-Games, run:
+or not give a path at all, in which case it will find the most recent model.
+```
+isaaclab --python scripts/play.py --task=Isaac-Cartpole-Direct-v0 --num_envs=20 --rl_library=your_library
+```
 
-```
-    isaaclab --python scripts/play.py --task=Isaac-Cartpole-Direct-v0 --checkpoint=/path/to/desired/checkpoint.pth --num_envs=20 --rl_library="rl_games"
-```
+
 
 ## Overview
 

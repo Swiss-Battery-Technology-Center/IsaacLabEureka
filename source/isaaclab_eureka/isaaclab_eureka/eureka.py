@@ -29,7 +29,7 @@ class Eureka:
         task: str,
         device: str = "cuda",
         env_seed: int = 42,
-        rl_library: Literal["rsl_rl", "rl_games"] = "rsl_rl",
+        rl_library: Literal["rsl_rl", "rl_games", "skrl"] = "rsl_rl",
         max_training_iterations: int = 100,
         feedback_subsampling: int = 10,
         temperature: float = 1.0,

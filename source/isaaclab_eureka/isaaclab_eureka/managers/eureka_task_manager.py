@@ -63,7 +63,7 @@ class EurekaTaskManager:
     def __init__(
         self,
         task: str,
-        rl_library: Literal["rsl_rl", "rl_games"] = "rsl_rl",
+        rl_library: Literal["rsl_rl", "rl_games", "skrl"] = "rsl_rl",
         num_processes: int = 1,
         device: str = "cuda",
         env_seed: int = 42,
@@ -266,7 +266,7 @@ class EurekaTaskManager:
         env._eureka_episode_sums["eureka_total_rewards"] = torch.zeros(env.num_envs, device=env.device)
         env._eureka_episode_sums["oracle_total_rewards"] = torch.zeros(env.num_envs, device=env.device)
 
-    def _run_training(self, framework: Literal["rsl_rl", "rl_games"] = "rsl_rl"):
+    def _run_training(self, framework: Literal["rsl_rl", "rl_games", "skrl"] = "rsl_rl"):
         """Run the training of the task."""
         from isaaclab_tasks.utils.parse_cfg import load_cfg_from_registry
 
@@ -339,5 +339,46 @@ class EurekaTaskManager:
             runner.reset()
             # train the agent
             runner.run({"train": True, "play": False, "sigma": None})
+        elif self._rl_library == "skrl":
+            import skrl
+            from skrl.utils.runner.torch import Runner
+            from isaaclab_rl.skrl import SkrlVecEnvWrapper
+
+            # max iterations for training
+            agent_cfg = load_cfg_from_registry(self._task, "skrl_cfg_entry_point")
+            agent_cfg["trainer"]["timesteps"] = self._max_training_iterations * agent_cfg["agent"]["rollouts"]
+            agent_cfg["trainer"]["close_environment_at_exit"] = False
+
+
+            # set the agent and environment seed from command line
+            # note: certain randomization occur in the environment initialization so we set the seed here
+            agent_cfg["seed"] = self._env_seed
+            agent_cfg["device"] = self._device
+
+            # specify directory for logging experiments
+            log_root_path = os.path.join("logs", "rl_runs", "skrl_eureka", agent_cfg["agent"]["experiment"]["directory"])
+            log_root_path = os.path.abspath(log_root_path)
+            print(f"[INFO] Logging experiment in directory: {log_root_path}")
+            # specify directory for logging runs: {time-stamp}_{run_name}
+            log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_Run-{self._idx}"
+        
+            print(f"Exact experiment name requested from command line {log_dir}")
+            if agent_cfg["agent"]["experiment"]["experiment_name"]:
+                log_dir += f'_{agent_cfg["agent"]["experiment"]["experiment_name"]}'
+            # set directory into agent config
+            agent_cfg["agent"]["experiment"]["directory"] = log_root_path
+            agent_cfg["agent"]["experiment"]["experiment_name"] = log_dir
+            # update log_dir
+            log_dir = os.path.join(log_root_path, log_dir)
+            self._log_dir = log_dir
+            # wrap around environment for skrl
+            env = SkrlVecEnvWrapper(self._env)  # ml_framework="torch", wrapper="isaaclab" by default
+
+            # configure and instantiate the skrl runner
+            # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
+            runner = Runner(env, agent_cfg)
+
+            # run training
+            runner.run()
         else:
             raise Exception(f"framework {framework} is not supported yet.")

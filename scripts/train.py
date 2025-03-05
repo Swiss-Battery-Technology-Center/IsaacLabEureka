@@ -6,7 +6,6 @@
 
 import argparse
 import os
-
 from isaaclab_eureka.eureka import Eureka
 
 
@@ -58,7 +57,7 @@ if __name__ == "__main__":
         "--rl_library",
         type=str,
         default="rsl_rl",
-        choices=["rsl_rl", "rl_games"],
+        choices=["rsl_rl", "rl_games", "skrl"],
         help="The RL training library to use.",
     )
     args_cli = parser.parse_args()
