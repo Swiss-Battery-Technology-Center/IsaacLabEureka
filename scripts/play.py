@@ -254,6 +254,8 @@ def main(args_cli):
             sleep_time = dt - (time.time() - start_time)
             if args_cli.real_time and sleep_time > 0:
                 time.sleep(sleep_time)
+            #some_random_comment
+            
     env.close()
     simulation_app.close()
 
