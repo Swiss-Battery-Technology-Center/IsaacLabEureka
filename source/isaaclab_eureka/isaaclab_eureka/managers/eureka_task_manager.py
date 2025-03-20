@@ -8,6 +8,7 @@ import multiprocessing
 import os
 import traceback
 import types
+import ast
 from contextlib import nullcontext
 from datetime import datetime
 from typing import Literal
@@ -51,7 +52,27 @@ def _reset_idx(self, env_ids):
         self._eureka_episode_sums[key][env_ids] = 0.0
     self.extras["log"].update(extras)
 """
+# Insert the logic to track success metric
+MANAGER_BASED_RESET_STRING = """
+from {module_name} import *
 
+@torch.inference_mode()
+def _reset_idx(self, env_ids):
+    if env_ids is None or len(env_ids) == self.num_envs:
+        env_ids = torch.arange(self.num_envs, device=self.device)
+    extras = dict()
+    # This needs to happen before self._reset_idx_original(env_ids) because it will reset buffers that might be needed
+    {success_metric}
+    self._reset_idx_original(env_ids)
+    if not "log" in self.extras:
+        self.extras["log"] = dict()
+    if hasattr(self, "_eureka_episode_sums"):
+        for key in self._eureka_episode_sums.keys():
+            episodic_sum_avg = torch.mean(self._eureka_episode_sums[key][env_ids])
+            extras["Eureka/"+key] = episodic_sum_avg / self.max_episode_length_s
+            self._eureka_episode_sums[key][env_ids] = 0.0
+    self.extras["log"].update(extras)
+"""
 
 class EurekaTaskManager:
     """Manages the set-up and training of a task using LLM-generated reward functions.
@@ -69,6 +90,9 @@ class EurekaTaskManager:
         env_seed: int = 42,
         max_training_iterations: int = 100,
         success_metric_string: str = "",
+        env_type: str = "",
+        task_type: str = "",
+        parameters_to_tune: list[str] = [],
     ):
         """Initialize the task manager. Each process will create an independent training run.
 
@@ -88,8 +112,11 @@ class EurekaTaskManager:
         self._max_training_iterations = max_training_iterations
         self._success_metric_string = success_metric_string
         self._env_seed = env_seed
+        self._env_type = env_type
         if self._success_metric_string:
             self._success_metric_string = "extras['Eureka/success_metric'] = " + self._success_metric_string
+        self._task_type = task_type
+        self._parameters_to_tune = parameters_to_tune
 
         self._processes = dict()
         # Used to communicate the reward functions to the processes
@@ -98,22 +125,35 @@ class EurekaTaskManager:
         self._observations_queue = multiprocessing.Queue()
         # Used to communicate the results of the training runs to the main process
         self._results_queue = multiprocessing.Queue()
+        self._initial_tuning_queue = multiprocessing.Queue()
+        # Used to get weights of reward terms in manager based 
+        # self._weights_queues = [multiprocessing.Queue() for _ in range(self._num_processes)]
         # Used to signal the processes to terminate
         self.termination_event = multiprocessing.Event()
-
         for idx in range(self._num_processes):
-            p = multiprocessing.Process(target=self._worker, args=(idx, self._rewards_queues[idx]))
+            if self.is_manager_based():
+                p = multiprocessing.Process(target=self._worker_manager_based, args=(idx, self._rewards_queues[idx]))
+            else:
+                p = multiprocessing.Process(target=self._worker, args=(idx, self._rewards_queues[idx]))
             self._processes[idx] = p
             p.start()
 
-        # Fetch the observations
-        self._get_observations_as_string = self._observations_queue.get()
+        # Fetch the observations, not needed for weight tuning
+        self._get_observations_as_string = None 
+        self._get_initial_tuning_as_string = None
+        if not self.is_manager_based():
+            self._get_observations_as_string = self._observations_queue.get()
+        else:
+            self._get_initial_tuning_as_string = self._initial_tuning_queue.get()
 
     @property
     def get_observations_method_as_string(self) -> str:
         """The _get_observations method of the environment as a string."""
-        return self._get_observations_as_string
-
+        return self._get_observations_as_string if self._get_observations_as_string else "Not available for manager-based environments."
+    
+    def is_manager_based(self):
+        return self._env_type == "manager_based"
+    
     def close(self):
         """Close the task manager and clean up the processes."""
         self.termination_event.set()
@@ -138,15 +178,17 @@ class EurekaTaskManager:
                 - "log_dir": The directory where the training logs are stored if the training succeeded.
                 - "exception": The exception message if the training failed.
         """
-        if len(get_rewards_method_as_string) != self._num_processes:
-            raise ValueError(
-                f"Number of reward methods in the list ({len(get_rewards_method_as_string)}) does not match the number"
-                f" of processes ({self._num_processes})."
-            )
+        if get_rewards_method_as_string:
+            # get_rewards_method_as_string is empty list [] at iter 0 of weight tuning, in which case we skip this part
+            if len(get_rewards_method_as_string) != self._num_processes:
+                raise ValueError(
+                    f"Number of reward methods in the list ({len(get_rewards_method_as_string)}) does not match the number"
+                    f" of processes ({self._num_processes})."
+                )
 
-        # Set the reward functions in each process
-        for idx, rewards_queue in enumerate(self._rewards_queues):
-            rewards_queue.put(get_rewards_method_as_string[idx])
+            # Set the reward functions in each process
+            for idx, rewards_queue in enumerate(self._rewards_queues):
+                rewards_queue.put(get_rewards_method_as_string[idx])
 
         results = [None] * self._num_processes
         # Wait for each process to finish and collect the results
@@ -163,6 +205,7 @@ class EurekaTaskManager:
             idx: The index of the worker.
             rewards_queue: The queue to receive the reward function from the main process
         """
+
         self._idx = idx
         while not self.termination_event.is_set():
             if not hasattr(self, "_env"):
@@ -187,6 +230,7 @@ class EurekaTaskManager:
                 except Exception as e:
                     result = {"success": False, "exception": str(e)}
                     print(traceback.format_exc())
+
             else:
                 result = {
                     "success": False,
@@ -214,10 +258,14 @@ class EurekaTaskManager:
         import gymnasium as gym
 
         import isaaclab_tasks  # noqa: F401
-        from isaaclab.envs import DirectRLEnvCfg
+        from isaaclab.envs import DirectRLEnvCfg, ManagerBasedRLEnv
         from isaaclab_tasks.utils import parse_env_cfg
 
-        env_cfg: DirectRLEnvCfg = parse_env_cfg(self._task)
+        if self._env_type == "manager_based":
+            env_cfg: ManagerBasedRLEnv = parse_env_cfg(self._task)
+        else: 
+            env_cfg: DirectRLEnvCfg = parse_env_cfg(self._task)
+
         env_cfg.sim.device = self._device
         env_cfg.seed = self._env_seed
         self._env = gym.make(self._task, cfg=env_cfg)
@@ -266,6 +314,132 @@ class EurekaTaskManager:
         env._eureka_episode_sums["eureka_total_rewards"] = torch.zeros(env.num_envs, device=env.device)
         env._eureka_episode_sums["oracle_total_rewards"] = torch.zeros(env.num_envs, device=env.device)
 
+
+    def _worker_manager_based(self, idx: int, rewards_queue: multiprocessing.Queue):
+        self._idx = idx
+        self._has_sent_initial_tuning = False
+        while not self.termination_event.is_set():
+            # first run, doesn't call llm, just create and run training
+            if not hasattr(self, "_env"):
+                self._create_environment()
+                if self._idx == 0 and not self._has_sent_initial_tuning:
+                    if self._task_type == "reward_weight_tuning":
+                        self._initial_tuning_as_string = self.get_initial_tuning()
+                        self._initial_tuning_queue.put(self._initial_tuning_as_string)
+                    if self._task_type == "ppo_tuning":
+                        self._initial_tuning_as_string = self._get_initial_ppo_params()
+                        self._initial_tuning_queue.put(self._initial_tuning_as_string)
+                    self._has_sent_initial_tuning = True
+            # uses new weights from llm
+            # if weight string was not properly formatted, llm manager will return ""
+            # do exception handling here
+            new_weights_string = rewards_queue.get() 
+            if len(new_weights_string) > 0: # if not empty string, weight string is properly formatted
+                try:
+                    if self._task_type == "reward_weight_tuning":
+                        self._prepare_eureka_environment_reset_weights(new_weights_string)
+                    self._prepare_eureka_environment_reset_idx()
+                    context = MuteOutput() if self._idx > 0 else nullcontext()
+                    with context:
+                        if self._task_type == "ppo_tuning":
+                            llm_param_names =ast.literal_eval(new_weights_string).keys()
+                            if set(self._parameters_to_tune) != set(llm_param_names):
+                                raise Exception(f"Parameter names {llm_param_names} in suggested tuning do not match the correct parameter names: {self._parameters_to_tune}")
+                            self._ppo_param_string = new_weights_string
+                        self._run_training()        
+                    result = {"success": True, "log_dir": self._log_dir}
+                except Exception as e:
+                    result = {"success": False, "exception": str(e)}    
+                    print(traceback.format_exc())
+            else:
+                    result = {
+                        "success": False,
+                        "exception": (
+                            "Your string response must follow the syntax. {'term1_name': 0.5, 'term2_name': 1.0}"
+                            "It should be a string representation of dictionary,"
+                            "whose keys are the term names as string and values are floats."
+                            "term names should be enlosed with single quotes"
+                            
+                        ),
+                    }
+            # construct {term_name : weight} dictionary
+            prev_weights_dict = {name: cfg.weight for name, cfg in zip(self._env.unwrapped.reward_manager._term_names, self._env.unwrapped.reward_manager._term_cfgs)}
+            result["prev_weights_str"] = repr(prev_weights_dict)
+            self._results_queue.put((self._idx, result))
+        # Clean up
+        print(f"[INFO]: Run {self._idx} terminated.")
+        self._env.close()
+        self._simulation_app.close()
+    def get_initial_tuning(self):
+        rm = self._env.unwrapped.reward_manager
+        initial_weights_dict = {name: cfg.weight for name, cfg in zip(rm._term_names, rm._term_cfgs)}
+        return repr(initial_weights_dict)
+    
+    def _prepare_eureka_environment_reset_weights(self, new_weights_string: str):
+        # runs only for reward weight tuning
+        # ppo tuning comes later
+        if self._task_type != "reward_weight_tuning":
+            return
+        import torch
+
+        env = self._env.unwrapped
+        new_weights_dict = ast.literal_eval(new_weights_string)
+        for name, weight in new_weights_dict.items():
+            try:
+                cfg = env.reward_manager.get_term_cfg(name)
+                cfg.weight = weight
+                env.reward_manager.set_term_cfg(name, cfg)
+            except Exception as e:
+                print(f"Error setting weight for {name} : {e}")
+    def _prepare_eureka_environment_reset_idx(self):
+        # runs only once for each process
+        import torch
+
+        env = self._env.unwrapped
+        namespace={}
+        if not hasattr(env, "_reset_idx_original"):
+            env._reset_idx_original = env._reset_idx
+            template_reset_string_with_success_metric = MANAGER_BASED_RESET_STRING.format(
+                module_name=env.__module__, success_metric=self._success_metric_string
+            )
+            # hack: can't enable inference with rl_games
+            if self._rl_library == "rl_games":
+                template_reset_string_with_success_metric = template_reset_string_with_success_metric.replace(
+                    "@torch.inference_mode()", ""
+                )
+            exec(template_reset_string_with_success_metric, namespace)
+            setattr(env, "_reset_idx", types.MethodType(namespace["_reset_idx"], env))
+    
+    def _get_initial_ppo_params(self):
+        """Get the agent configuration for the task."""
+        import time
+        time.sleep(10)
+        from isaaclab_tasks.utils.parse_cfg import load_cfg_from_registry
+
+        if self._rl_library == "rsl_rl":
+            from rsl_rl.runners import OnPolicyRunner
+            from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg
+            agent_cfg: RslRlOnPolicyRunnerCfg = load_cfg_from_registry(self._task, "rsl_rl_cfg_entry_point")
+            agent_cfg_dict = agent_cfg.to_dict()
+        elif self._rl_library == "skrl":
+            import skrl
+            from skrl.utils.runner.torch import Runner
+            from isaaclab_rl.skrl import SkrlVecEnvWrapper
+            # for skrl it is already a dict
+            agent_cfg_dict = load_cfg_from_registry(self._task, "skrl_cfg_entry_point")
+        else:
+            raise Exception(f"PPO tuning supports only rsl_rl and skrl")
+        initial_tuning = {}
+        for param_path in self._parameters_to_tune:
+            try:
+                value = agent_cfg_dict
+                for key in param_path.split("."):
+                    value = value[key]  # Traverse the dictionary
+                initial_tuning[param_path] = value  # Store as 'key1.key2.key3': value
+            except KeyError:
+                raise KeyError(f"Parameter {'.'.join(param_path)} not found in agent_cfg") 
+        return repr(initial_tuning)
+    
     def _run_training(self, framework: Literal["rsl_rl", "rl_games", "skrl"] = "rsl_rl"):
         """Run the training of the task."""
         from isaaclab_tasks.utils.parse_cfg import load_cfg_from_registry
@@ -289,7 +463,17 @@ class EurekaTaskManager:
             self._log_dir = os.path.join(log_root_path, log_dir)
 
             env = RslRlVecEnvWrapper(self._env)
-            runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=self._log_dir, device=agent_cfg.device)
+            agent_cfg_dict = agent_cfg.to_dict()
+            if self._task_type == "ppo_tuning":
+                # update the agent configuration with the ppo tuning parameters
+                ppo_tuning_dict = ast.literal_eval(self._ppo_param_string)
+                for param_path, new_value in ppo_tuning_dict.items():
+                    keys = param_path.split(".")
+                    d = agent_cfg_dict
+                    for key in keys[:-1]:
+                        d = d[key]
+                    d[keys[-1]] = new_value
+            runner = OnPolicyRunner(env, agent_cfg_dict, log_dir=self._log_dir, device=agent_cfg.device)
             runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
 
         elif self._rl_library == "rl_games":
@@ -373,7 +557,13 @@ class EurekaTaskManager:
             self._log_dir = log_dir
             # wrap around environment for skrl
             env = SkrlVecEnvWrapper(self._env)  # ml_framework="torch", wrapper="isaaclab" by default
-
+            ppo_tuning_dict = ast.literal_eval(self._ppo_param_string)
+            for param_path, new_value in ppo_tuning_dict.items():
+                keys = param_path.split(".")
+                d = agent_cfg
+                for key in keys[:-1]:
+                    d = d[key]
+                d[keys[-1]] = new_value
             # configure and instantiate the skrl runner
             # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
             runner = Runner(env, agent_cfg)

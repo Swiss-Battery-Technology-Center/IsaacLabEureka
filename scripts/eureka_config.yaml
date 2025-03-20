@@ -1,0 +1,47 @@
+# copy and paste to eureka_config.yaml and edit there
+
+task: "SBTC-Unscrew-Franka-OSC-v0" # or "SBTC-Lift-Franka-OSC-v0" 
+
+# eureka parallel runs, set 5 for evolutionary search
+# supported only for manager-based tuning
+num_parallel_runs: 1
+
+feedback_subsampling: 1 # best to choose max_training_iterations/10. subsampling of training result/history, later given to llm 
+max_eureka_iterations: 5 # one iteration consists of full RL training + getting a new reward/ppo tuning from llm
+
+
+# LLM-related arguments
+gpt_model: "google/gemini-2.0-pro-exp-02-05:free" # or "google/gemma-3-12b-it:free", any free model from https://openrouter.ai/models?max_price=0
+temperature: 1
+
+# IsaacLab related arguments
+num_envs: 2048 # choose appropriate value for task(lift or unscrew)
+max_training_iterations: 10 # RL iteration, choose appropriate value for task(lift or unscrew)
+env_type: "manager_based" # "manager_based" or "direct"
+task_type: "ppo_tuning" # "ppo_tuning" or "reward_weight_tuning"
+
+# "rsl_rl" , "rl_games",  "skrl" supported for "reward_weight_tuning", 
+# "rsl_rl" , "skrl" supported for "ppo_tuning"
+rl_library: "rsl_rl" 
+
+# only for ppo_tuning
+# your choice of parameters to tune
+# parameters should be library-specific and represent the nested structure
+
+# parameters_to_tune: 
+#   - "models.policy.clip_actions"
+#   - "models.policy.min_log_std"
+#   - "agent.discount_factor"
+#   - "agent.learning_rate"
+#   - "agent.learning_rate_scheduler_kwargs.kl_threshold"
+#   - "agent.kl_threshold"
+
+# ex for rsl_rl
+
+parameters_to_tune: 
+  - "algorithm.clip_param"
+  - "algorithm.entropy_coef"
+  - "algorithm.desired_kl"
+  - "algorithm.learning_rate"
+  - "algorithm.use_clipped_value_loss"
+  - "policy.init_noise_std"

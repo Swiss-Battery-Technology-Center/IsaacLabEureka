@@ -7,7 +7,20 @@
 import argparse
 import os
 from isaaclab_eureka.eureka import Eureka
+import yaml
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "eureka_config.yaml")  # Ensure path is correct
 
+def load_yaml_config(config_path):
+    """Load configuration from YAML file."""
+    with open(config_path, "r") as file:
+        return yaml.safe_load(file)
+
+def merge_args_with_yaml(args, yaml_config):
+    """Merge command-line arguments with YAML config (YAML overrides CLI)."""
+    merged_config = vars(args)  # Convert argparse Namespace to dictionary
+    for key, value in yaml_config.items():
+        merged_config[key] = value  # YAML overrides CLI arguments
+    return argparse.Namespace(**merged_config)  # Convert back to Namespace
 
 def main(args_cli):
     eureka = Eureka(
@@ -20,12 +33,16 @@ def main(args_cli):
         feedback_subsampling=args_cli.feedback_subsampling,
         temperature=args_cli.temperature,
         gpt_model=args_cli.gpt_model,
+        env_type=args_cli.env_type,
+        task_type=args_cli.task_type,
+        parameters_to_tune=args_cli.parameters_to_tune 
     )
 
     eureka.run(max_eureka_iterations=args_cli.max_eureka_iterations)
 
 
 if __name__ == "__main__":
+    yaml_config = load_yaml_config(CONFIG_PATH)
     parser = argparse.ArgumentParser(description="Train an RL agent with Eureka.")
     parser.add_argument("--task", type=str, default="Isaac-Cartpole-Direct-v0", help="Name of the task.")
     parser.add_argument(
@@ -60,8 +77,16 @@ if __name__ == "__main__":
         choices=["rsl_rl", "rl_games", "skrl"],
         help="The RL training library to use.",
     )
+    parser.add_argument("--env_type", type=str, default="", help="Type of IsaacLab env")
+    parser.add_argument("--task_type", type=str, default="reward_weight_tuning", help="Eureka task type.")
+    parser.add_argument("--parameters_to_tune", nargs="+", default=[], help="List of parameters to tune (for PPO tuning).")
     args_cli = parser.parse_args()
+    
+    args_cli = merge_args_with_yaml(args_cli, yaml_config)
 
+    if isinstance(args_cli.parameters_to_tune, str):  # If a single string, convert to list
+        args_cli.parameters_to_tune = [args_cli.parameters_to_tune]
+        
     # Check parameter validity
     if os.name == "nt" and args_cli.num_parallel_runs > 1:
         print(

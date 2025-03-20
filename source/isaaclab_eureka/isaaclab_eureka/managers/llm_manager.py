@@ -7,7 +7,6 @@ import re
 
 import openai
 
-
 class LLMManager:
     """Manager to interface with the LLM API.
 
@@ -25,6 +24,9 @@ class LLMManager:
         num_suggestions: int,
         temperature: float,
         system_prompt: str,
+        env_type: str = "",
+        task_type: str = "",
+        parameters_to_tune: list[str] = [],
     ):
         """Initialize the LLMManager
 
@@ -47,12 +49,19 @@ class LLMManager:
                 base_url="https://openrouter.ai/api/v1",
                 api_key=os.environ.get("OPENROUTER_API_KEY")
             )
-            self._gpt_model = "google/gemini-2.0-pro-exp-02-05:free"
         elif "OPENAI_API_KEY" in os.environ:
             self._client = openai.OpenAI()
         else:
             raise RuntimeError("No Openai API key found in environment variables")
-
+        self._total_tokens=0
+        self._total_query_tokens=0
+        self._total_response_tokens=0
+        self._input_token_price = 0.27
+        self._output_token_price = 1.10
+        
+    def append_to_system_prompt(self, additioal_prompt: str):
+        assert self._prompts[0]["role"] == "system" 
+        self._prompts[0]["content"] += additioal_prompt
     def extract_code_from_response(self, response: str) -> str:
         """Extract the code component from the LLM response
 
@@ -102,9 +111,57 @@ class LLMManager:
             )
         except Exception as e:
             raise RuntimeError("An error occurred while prompting the LLM") from e
-
+        self._total_tokens += responses.usage.total_tokens
+        self._total_query_tokens += responses.usage.prompt_tokens
+        self._total_response_tokens += responses.usage.completion_tokens
         raw_outputs = [response.message.content for response in responses.choices]
         reward_strings = [
             self.extract_code_from_response(raw_output) for raw_output in raw_outputs
         ]
         return {"reward_strings": reward_strings, "raw_outputs": raw_outputs}
+    
+    def extract_multiple_weights_from_response(self, response: str) -> list[str]:
+        """Extracts the weights string from the LLM response.
+
+        The function looks for a dictionary-like structure `{name: weight, name: weight, ...}`
+        inside the response. The weight values should be float numbers.
+
+        Args:
+            response: The raw response from the LLM API.
+
+        Returns:
+            A string representation of the weight dictionary if found, else an empty string.
+        """
+        pattern = r"\{[^{}]*\}" # Match anything inside curly braces `{...}` a little bit dangerous...
+        matches = re.findall(pattern, response, re.DOTALL)
+        return matches
+    
+    def prompt_weights(self, user_prompt: str, assistant_prompt: str = None) -> list[str]:
+
+        if assistant_prompt is not None:
+            self._prompts.append({"role": "assistant", "content": assistant_prompt})
+        self._prompts.append({"role": "user", "content": user_prompt})
+
+        # The official Eureka code only keeps the last round of feedback
+        if len(self._prompts) == 6:
+            self._prompts.pop(2)
+            self._prompts.pop(2)
+
+        try:
+            responses = self._client.chat.completions.create(
+                model=self._gpt_model,
+                messages=self._prompts,
+                temperature=self._temperature,
+                n=self._num_suggestions,
+            )
+        except Exception as e:
+            raise RuntimeError("An error occurred while prompting the LLM") from e
+
+        raw_outputs = [response.message.content for response in responses.choices]
+        # This only works for a single response that contains multiple weight strings
+        weights_strings = self.extract_multiple_weights_from_response(raw_outputs[0]) 
+        self._total_tokens += responses.usage.total_tokens
+        self._total_query_tokens += responses.usage.prompt_tokens
+        self._total_response_tokens += responses.usage.completion_tokens
+        return {"weight_strings": weights_strings, "raw_outputs": raw_outputs}
+    
