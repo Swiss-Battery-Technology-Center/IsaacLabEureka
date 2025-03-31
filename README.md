@@ -11,45 +11,22 @@ Go to root repo directory ``/workspace/isaaclab/_isaaclab_eureka``.
 
     Get an api key from [openrouter](https://openrouter.ai/).
 
-        ```
-        echo 'export OPENROUTER_API_KEY="your_openrouter_key"' >> ~/.bashrc
-        source ~/.bashrc
-        ```
+    ```
+    echo 'export OPENROUTER_API_KEY="your_openrouter_key"' >> ~/.bashrc
+    source ~/.bashrc
+    ```
 
-- PPO HYPERPARAMETER TUNING
+- PPO HYPERPARAMETER TUNING, REWARD WEIGHT TUNING
 
-    Set your arguments in `scripts\eureka_cofig.yaml`. These arguments will be used to instantiate Eureka. 
+    Set your arguments in `scripts\eureka_config.yaml`. These arguments will be used to instantiate Eureka. 
     
-    Have a look at `scripts\ppo_tuning_ex.yaml` for an example.
+    Have a look at `scripts\ppo_tuning_ex.yaml` and `scripts\reward_weight_tuning_ex.yaml`.
 
-- Train
+- HOW TO READ RESULTS
 
-With open source model "google/gemini-2.0-pro-exp-02-05:free" from [openrouter](https://openrouter.ai/models?max_price=0).
+    `_isaaclab_eureka/logs` contain text summaries: metrics, training history, GPT tuning suggestions, GPT reasoning, etc.
 
-You can use `rsl_rl`, `rl_games`, `skrl` for `--rl_library`.
-```
-OPENROUTER_API_KEY=your_openrouter_key isaaclab --python scripts/train.py --task=Isaac-Cartpole-Direct-v0 --max_training_iterations=100 --rl_library=your_library
-```
-
-With gpt4o from OpenAI (must pay for prompting)
-```
-OPENAI_API_KEY=your_openai_key isaaclab --python scripts/train.py --task=Isaac-Cartpole-Direct-v0 --max_training_iterations=100 --rl_library=rsl_rl
-```
-
-
-- Play a Eureka trained policy
-
-You can use `rsl_rl`, `rl_games`, `skrl` for `--rl_library`.
-You can give ABSOLUTE PATH TO YOUR CHECKPOINT, 
-
-```
-isaaclab --python scripts/play.py --task=Isaac-Cartpole-Direct-v0 --checkpoint=/ABSOLUTE/PATH/TO/YOUR/CHECKPOINT --num_envs=20 --rl_library=your_library
-```
-
-or not give a path at all, in which case it will find the most recent model.
-```
-isaaclab --python scripts/play.py --task=Isaac-Cartpole-Direct-v0 --num_envs=20 --rl_library=your_library
-```
+    `logs/rl_runs` contain actual models. Use Tensorboard to visualize data.
 
 
 
