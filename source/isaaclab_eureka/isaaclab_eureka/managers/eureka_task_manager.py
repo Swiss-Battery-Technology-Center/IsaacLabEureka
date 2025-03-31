@@ -461,6 +461,8 @@ class EurekaTaskManager:
             log_root_path = os.path.abspath(log_root_path)
             if self._warmstart:
                 log_root_path = os.path.join(log_root_path, "warmstart")
+            else:
+                log_root_path = os.path.join(log_root_path, "randstart")
             print(f"[INFO] Logging experiment in directory: {log_root_path}")
             # specify directory for logging runs: {time-stamp}_{run_name}
             log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_Run-{self._idx}_iter-{self._eureka_iter}"
@@ -501,6 +503,8 @@ class EurekaTaskManager:
             log_root_path = os.path.abspath(log_root_path)
             if self._warmstart:
                 log_root_path = os.path.join(log_root_path, "warmstart")
+            else:
+                log_root_path = os.path.join(log_root_path, "randstart")
             print(f"[INFO] Logging experiment in directory: {log_root_path}")
             # specify directory for logging runs
             log_dir = (
@@ -555,6 +559,8 @@ class EurekaTaskManager:
             log_root_path = os.path.abspath(log_root_path)
             if self._warmstart:
                 log_root_path = os.path.join(log_root_path, "warmstart")
+            else:
+                log_root_path = os.path.join(log_root_path, "randstart")
             print(f"[INFO] Logging experiment in directory: {log_root_path}")
             # specify directory for logging runs: {time-stamp}_{run_name}
             log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_Run-{self._idx}_iter-{self._eureka_iter}"

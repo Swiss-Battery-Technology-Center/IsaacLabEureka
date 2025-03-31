@@ -118,7 +118,7 @@ class Eureka:
         if warmstart:
             self._log_dir = os.path.join(EUREKA_ROOT_DIR, "logs", "eureka", task, task_type, "warmstart", timestamp)
         else:
-            self._log_dir = os.path.join(EUREKA_ROOT_DIR, "logs", "eureka", task, task_type, timestamp)
+            self._log_dir = os.path.join(EUREKA_ROOT_DIR, "logs", "eureka", task, task_type,"randstart", timestamp)
         os.makedirs(self._log_dir)
         self._tensorboard_writer = TensorboardSummaryWriter(log_dir=self._log_dir, flush_secs=10)
     
@@ -413,8 +413,11 @@ class Eureka:
         # write the iterations results to file
         with open(f"{self._log_dir}/eureka_iterations.txt", "a") as f:
             for idx, result in enumerate(results):
-                if iter == 0 and self._task_manager._warmstart:
-                    f.write(f"Using Warmstart\n")
+                if iter == 0:
+                    if self._task_manager._warmstart:
+                        f.write(f"Using Warmstart\n")
+                    else:
+                        f.write(f"Using Randstart\n")
                 f.write(f"{'#' * 20} Iteration: {iter} {'#' * 20}\n\n")
                 f.write(f"{'*' * 20} Run: {idx} {'*' * 20}\n")
                 f.write(f"- GPT reward method {result['assistant_prompt']}\n")
@@ -435,6 +438,8 @@ class Eureka:
         output = ""
         if self._task_manager._warmstart:
             output += f"Using Warmstart\n"
+        else:   
+            output += f"Using Randstart\n"
         if best_run_results["success_metric"] is not None:
             output += f"- Success metric: {best_run_results['success_metric']}\n"
             output += f"- GPT reward method: {best_run_results['gpt_reward_method']}\n"

@@ -74,12 +74,14 @@ Your goal is to write a reward function for the environment that will help the a
 MANAGER_BASED_WEIGHT_TUNING_INITIAL_PROMPT = """
 You are a reward engineer trying to tune weights of reward terms to solve reinforcement learning tasks as effective as possible in Isaac Lab manager based environment.
 Your goal is to suggest better weights for reward terms, so that the agent will learn the task described in text faster.
+Note that you are only choosing the initial weights for the reward terms, curriculum might change the weights during training.
 """ + MANAGER_BASED_WEIGHT_TUNING_FORMATTING_INSTRUCTIONS
 
 MANAGER_BASED_PPO_TUNING_INITIAL_PROMPT = """
 You are an RL engineer trying to tune hyperparameters of ppo algorithm to solve reinforcement learning tasks as effective as possible in Isaac Lab manager based environment.
 Your goal is to suggest better ppo hyperparameter tunings, so that the agent will learn the task described in text faster.
 Use your knowledge of ppo algorithm and the task description to suggest better ppo hyperparameter tunings.
+Note that due to curriculum, the reward weights might change during training.
 """ + MANAGER_BASED_PPO_TUNING_FORMATTING_INSTRUCTIONS
 
 TASK_FAILURE_FEEDBACK_PROMPT = """
