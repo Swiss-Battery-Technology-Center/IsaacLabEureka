@@ -17,8 +17,8 @@ temperature: 1
 # IsaacLab related arguments
 num_envs: 1024 # choose appropriate value for task, 1024 for unscrew/lift
 
-max_training_iterations: 800 # RL learning iterations, 800 for lift, 1500 for unscrew
-feedback_subsampling: 80 # best to choose max_training_iterations/10. subsampling of training result/history, later given to llm 
+max_training_iterations: 700 # RL learning iterations, 800 for lift, 1500 for unscrew
+feedback_subsampling: 70 # best to choose max_training_iterations/10. subsampling of training result/history, later given to llm 
 
 env_type: "manager_based" # "manager_based" or "direct"
 task_type: "ppo_tuning" # "ppo_tuning" or "reward_weight_tuning"

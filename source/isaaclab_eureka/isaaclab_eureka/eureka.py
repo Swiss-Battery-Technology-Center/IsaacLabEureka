@@ -452,7 +452,7 @@ class Eureka:
         output += f"Input token usage: {self._llm_manager._total_query_tokens}\n"
         output += f"Output token usage: {self._llm_manager._total_response_tokens}\n"
         charge = self._llm_manager._total_query_tokens / (10**6)*self._llm_manager._input_token_price + self._llm_manager._total_response_tokens / (10**6)*self._llm_manager._output_token_price
-        output += f"Price: {charge}$\n"
+        output += f"Price: {charge:.3f}$\n"
 
         print(f"Final output: {output}")
         with open(f"{self._log_dir}/eureka_final_result.txt", "w") as f:
