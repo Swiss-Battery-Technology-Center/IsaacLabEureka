@@ -1,13 +1,13 @@
 # all the configuration parameters for eureka
 
-task: "SBTC-Unscrew-Franka-OSC-v0" # "SBTC-Lift-Cube-Franka-OSC-v0" "SBTC-Unscrew-Franka-OSC-v0"
+task: "SBTC-Lift-Cube-Franka-OSC-v0" # "SBTC-Lift-Cube-Franka-OSC-v0" "SBTC-Unscrew-Franka-OSC-v0"
 
 # eureka parallel runs, set 5 for evolutionary search
 # supported only for manager-based tuning
 num_parallel_runs: 1
 
 
-max_eureka_iterations: 3 # one iteration consists of full RL training + getting a new reward/ppo tuning from llm
+max_eureka_iterations: 10 # one iteration consists of full RL training + getting a new reward/ppo tuning from llm
 
 
 # LLM-related arguments
@@ -17,8 +17,8 @@ temperature: 1
 # IsaacLab related arguments
 num_envs: 1024 # choose appropriate value for task, 1024 for unscrew/lift
 
-max_training_iterations: 10 # RL learning iterations, 800 for lift, 1500 for unscrew
-feedback_subsampling: 1 # best to choose max_training_iterations/10. subsampling of training result/history, later given to llm 
+max_training_iterations: 800 # RL learning iterations, 800 for lift, 1500 for unscrew
+feedback_subsampling: 80 # best to choose max_training_iterations/10. subsampling of training result/history, later given to llm 
 
 env_type: "manager_based" # "manager_based" or "direct"
 task_type: "ppo_tuning" # "ppo_tuning" or "reward_weight_tuning"
@@ -26,7 +26,7 @@ warmstart: True # True will use SBTC tuning for the first RL training
 
 # "rsl_rl" , "rl_games",  "skrl" supported for "reward_weight_tuning", 
 # "rsl_rl" , "skrl" supported for "ppo_tuning"
-rl_library: "skrl" 
+rl_library: "rsl_rl" 
 
 # only for ppo_tuning
 # your choice of parameters to tune
@@ -34,11 +34,11 @@ rl_library: "skrl"
 
 # for skrl
 
-parameters_to_tune: 
-  - "agent.learning_rate"
-  - "agent.entropy_loss_scale"
-  - "agent.kl_threshold"
-  - "agent.lambda"
+# parameters_to_tune: 
+#   - "agent.learning_rate"
+#   - "agent.entropy_loss_scale"
+#   - "agent.kl_threshold"
+#   - "agent.lambda"
 #   - "agent.learning_rate_scheduler_kwargs.kl_threshold"
 #   - "agent.kl_threshold"
 #   - "models.policy.clip_actions"
@@ -47,10 +47,10 @@ parameters_to_tune:
 
 # for rsl_rl
 
-# parameters_to_tune: 
-#   - "algorithm.clip_param"
-#   - "algorithm.entropy_coef"
-#   - "algorithm.desired_kl"
-#   - "algorithm.learning_rate"
-#  - "algorithm.use_clipped_value_loss"
-#  - "policy.init_noise_std"
+parameters_to_tune: 
+  - "algorithm.learning_rate"
+  - "algorithm.entropy_coef"
+  - "algorithm.desired_kl"
+  - "algorithm.clip_param"
+  # - "algorithm.use_clipped_value_loss"
+  # - "policy.init_noise_std"

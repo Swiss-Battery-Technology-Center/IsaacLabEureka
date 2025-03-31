@@ -481,8 +481,8 @@ class EurekaTaskManager:
                     d[keys[-1]] = new_value
             runner = OnPolicyRunner(env, agent_cfg_dict, log_dir=self._log_dir, device=agent_cfg.device)
             env_cfg = self._env.unwrapped.cfg
-            dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
-            dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
+            dump_yaml(os.path.join(self._log_dir, "params", "env.yaml"), env_cfg)
+            dump_yaml(os.path.join(self._log_dir, "params", "agent.yaml"), agent_cfg)
             runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
 
         elif self._rl_library == "rl_games":
@@ -583,8 +583,8 @@ class EurekaTaskManager:
             # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
             runner = Runner(env, agent_cfg)
             env_cfg = self._env.unwrapped.cfg
-            dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
-            dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
+            dump_yaml(os.path.join(self._log_dir, "params", "env.yaml"), env_cfg)
+            dump_yaml(os.path.join(self._log_dir, "params", "agent.yaml"), agent_cfg)
             # run training
             runner.run()
         else:
