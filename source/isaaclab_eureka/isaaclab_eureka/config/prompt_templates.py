@@ -79,6 +79,7 @@ Your goal is to suggest better weights for reward terms, so that the agent will 
 MANAGER_BASED_PPO_TUNING_INITIAL_PROMPT = """
 You are an RL engineer trying to tune hyperparameters of ppo algorithm to solve reinforcement learning tasks as effective as possible in Isaac Lab manager based environment.
 Your goal is to suggest better ppo hyperparameter tunings, so that the agent will learn the task described in text faster.
+Use your knowledge of ppo algorithm and the task description to suggest better ppo hyperparameter tunings.
 """ + MANAGER_BASED_PPO_TUNING_FORMATTING_INSTRUCTIONS
 
 TASK_FAILURE_FEEDBACK_PROMPT = """

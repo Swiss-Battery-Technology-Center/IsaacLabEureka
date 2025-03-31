@@ -34,14 +34,14 @@ TASKS_CFG = {
     },
     "SBTC-Lift-Cube-Franka-OSC-v0":{
         "description": "Use Franka arm to lift an object and bring it to a target position in air. Task is considered to be successful if the distance between the object and the target position is less than threshold.",
-        "success_metric": "torch.where(self.scene['object'].data.root_pos_w[:, 2] > 0.04, 1.0, 0.0).mean()",
-        "success_metric_to_win": 0.6,
+        "success_metric": "0",
+        "success_metric_to_win": 0.9,
         "success_metric_tolerance": 0.1,
     },
         "SBTC-Unscrew-Franka-OSC-v0":{
         "description": "Use Franka arm to approach a screw, engage and unscrew it. Task is considered to be successful if robot arm end effector engages/clicks with the screw.",
-        "success_metric": "torch.where(self.scene['object'].data.root_pos_w[:, 2] > 0.04, 1.0, 0.0).mean()",
-        "success_metric_to_win": 0.6,
+        "success_metric": "0",
+        "success_metric_to_win": 0.9,
         "success_metric_tolerance": 0.1,
     },
 

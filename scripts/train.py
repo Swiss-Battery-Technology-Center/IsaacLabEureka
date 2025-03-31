@@ -35,7 +35,8 @@ def main(args_cli):
         gpt_model=args_cli.gpt_model,
         env_type=args_cli.env_type,
         task_type=args_cli.task_type,
-        parameters_to_tune=args_cli.parameters_to_tune 
+        parameters_to_tune=args_cli.parameters_to_tune,
+        warmstart = args_cli.warmstart,
     )
 
     eureka.run(max_eureka_iterations=args_cli.max_eureka_iterations)

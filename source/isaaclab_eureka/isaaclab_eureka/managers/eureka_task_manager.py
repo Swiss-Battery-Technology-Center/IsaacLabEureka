@@ -12,8 +12,9 @@ import ast
 from contextlib import nullcontext
 from datetime import datetime
 from typing import Literal
-
+from isaaclab_eureka import EUREKA_ROOT_DIR
 from isaaclab_eureka.utils import MuteOutput, get_freest_gpu
+from isaaclab.utils.io.yaml import dump_yaml
 
 TEMPLATE_REWARD_STRING = """
 from {module_name} import *
@@ -93,6 +94,7 @@ class EurekaTaskManager:
         env_type: str = "",
         task_type: str = "",
         parameters_to_tune: list[str] = [],
+        warmstart: bool = False,
     ):
         """Initialize the task manager. Each process will create an independent training run.
 
@@ -117,7 +119,7 @@ class EurekaTaskManager:
             self._success_metric_string = "extras['Eureka/success_metric'] = " + self._success_metric_string
         self._task_type = task_type
         self._parameters_to_tune = parameters_to_tune
-
+        self._warmstart = warmstart
         self._processes = dict()
         # Used to communicate the reward functions to the processes
         self._rewards_queues = [multiprocessing.Queue() for _ in range(self._num_processes)]
@@ -318,6 +320,7 @@ class EurekaTaskManager:
     def _worker_manager_based(self, idx: int, rewards_queue: multiprocessing.Queue):
         self._idx = idx
         self._has_sent_initial_tuning = False
+        self._eureka_iter = 0
         while not self.termination_event.is_set():
             # first run, doesn't call llm, just create and run training
             if not hasattr(self, "_env"):
@@ -365,6 +368,7 @@ class EurekaTaskManager:
             # construct {term_name : weight} dictionary
             prev_weights_dict = {name: cfg.weight for name, cfg in zip(self._env.unwrapped.reward_manager._term_names, self._env.unwrapped.reward_manager._term_cfgs)}
             result["prev_weights_str"] = repr(prev_weights_dict)
+            self._eureka_iter += 1
             self._results_queue.put((self._idx, result))
         # Clean up
         print(f"[INFO]: Run {self._idx} terminated.")
@@ -453,11 +457,13 @@ class EurekaTaskManager:
             agent_cfg.device = self._device
             agent_cfg.max_iterations = self._max_training_iterations
 
-            log_root_path = os.path.join("logs", "rl_runs", "rsl_rl_eureka", agent_cfg.experiment_name)
+            log_root_path = os.path.join( "logs", "rl_runs", "rsl_rl_eureka", agent_cfg.experiment_name, self._task_type)
             log_root_path = os.path.abspath(log_root_path)
+            if self._warmstart:
+                log_root_path = os.path.join(log_root_path, "warmstart")
             print(f"[INFO] Logging experiment in directory: {log_root_path}")
             # specify directory for logging runs: {time-stamp}_{run_name}
-            log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_Run-{self._idx}"
+            log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_Run-{self._idx}_iter-{self._eureka_iter}"
             if agent_cfg.run_name:
                 log_dir += f"_{agent_cfg.run_name}"
             self._log_dir = os.path.join(log_root_path, log_dir)
@@ -474,6 +480,9 @@ class EurekaTaskManager:
                         d = d[key]
                     d[keys[-1]] = new_value
             runner = OnPolicyRunner(env, agent_cfg_dict, log_dir=self._log_dir, device=agent_cfg.device)
+            env_cfg = self._env.unwrapped.cfg
+            dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
+            dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
             runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
 
         elif self._rl_library == "rl_games":
@@ -488,13 +497,15 @@ class EurekaTaskManager:
             agent_cfg["params"]["config"]["device"] = self._device
             agent_cfg["params"]["config"]["device_name"] = self._device
             # specify directory for logging experiments
-            log_root_path = os.path.join("logs", "rl_runs", "rl_games_eureka", agent_cfg["params"]["config"]["name"])
+            log_root_path = os.path.join("logs", "rl_runs", "rl_games_eureka", agent_cfg["params"]["config"]["name"], self._task_type)
             log_root_path = os.path.abspath(log_root_path)
+            if self._warmstart:
+                log_root_path = os.path.join(log_root_path, "warmstart")
             print(f"[INFO] Logging experiment in directory: {log_root_path}")
             # specify directory for logging runs
             log_dir = (
                 agent_cfg["params"]["config"].get("full_experiment_name", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
-                + f"_Run-{self._idx}"
+                + f"_Run-{self._idx}_iter-{self._eureka_iter}"
             )
             # set directory into agent config
             # logging directory path: <train_dir>/<full_experiment_name>
@@ -540,11 +551,13 @@ class EurekaTaskManager:
             agent_cfg["device"] = self._device
 
             # specify directory for logging experiments
-            log_root_path = os.path.join("logs", "rl_runs", "skrl_eureka", agent_cfg["agent"]["experiment"]["directory"])
+            log_root_path = os.path.join("logs", "rl_runs", "skrl_eureka", agent_cfg["agent"]["experiment"]["directory"], self._task_type)
             log_root_path = os.path.abspath(log_root_path)
+            if self._warmstart:
+                log_root_path = os.path.join(log_root_path, "warmstart")
             print(f"[INFO] Logging experiment in directory: {log_root_path}")
             # specify directory for logging runs: {time-stamp}_{run_name}
-            log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_Run-{self._idx}"
+            log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + f"_Run-{self._idx}_iter-{self._eureka_iter}"
         
             print(f"Exact experiment name requested from command line {log_dir}")
             if agent_cfg["agent"]["experiment"]["experiment_name"]:
@@ -557,17 +570,21 @@ class EurekaTaskManager:
             self._log_dir = log_dir
             # wrap around environment for skrl
             env = SkrlVecEnvWrapper(self._env)  # ml_framework="torch", wrapper="isaaclab" by default
-            ppo_tuning_dict = ast.literal_eval(self._ppo_param_string)
-            for param_path, new_value in ppo_tuning_dict.items():
-                keys = param_path.split(".")
-                d = agent_cfg
-                for key in keys[:-1]:
-                    d = d[key]
-                d[keys[-1]] = new_value
+            if self._task_type == "ppo_tuning":
+                # update the agent configuration with the ppo tuning parameters
+                ppo_tuning_dict = ast.literal_eval(self._ppo_param_string)
+                for param_path, new_value in ppo_tuning_dict.items():
+                    keys = param_path.split(".")
+                    d = agent_cfg
+                    for key in keys[:-1]:
+                        d = d[key]
+                    d[keys[-1]] = new_value
             # configure and instantiate the skrl runner
             # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
             runner = Runner(env, agent_cfg)
-
+            env_cfg = self._env.unwrapped.cfg
+            dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
+            dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
             # run training
             runner.run()
         else:

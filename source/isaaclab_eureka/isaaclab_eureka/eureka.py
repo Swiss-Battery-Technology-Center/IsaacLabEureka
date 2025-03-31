@@ -50,6 +50,7 @@ class Eureka:
         env_type: str = "",
         task_type: str = "reward_weight_tuning",
         parameters_to_tune: list[str] = [],
+        warmstart:bool = False,
     ):
         """Initialize the Eureka class.
 
@@ -82,7 +83,7 @@ class Eureka:
         self._feedback_subsampling = feedback_subsampling
         self._num_processes = num_parallel_runs if env_type == "manager_based" else 1
         self._success_metric_string = success_metric_string
-
+        self.task_success_reward_name = TASK_SUCCESS_REWARD_NAME_DICT[task]
         print("[INFO]: Setting up the LLM Manager...")
         self._llm_manager = LLMManager(
                 gpt_model=gpt_model,
@@ -94,7 +95,7 @@ class Eureka:
                 parameters_to_tune=parameters_to_tune,
             )
         # this should apply to all manager based, so fix later
-        if task_type == "ppo_tuning":
+        if self._num_processes > 1:
             self._llm_manager.append_to_system_prompt(MULTIPLE_SUGGESTIONS_INSTRUCTION.format(num_parallel_runs=num_parallel_runs) + MULTIPLE_SUGGESTIONS_EXAMPLE)
         
         print("[INFO]: Setting up the Task Manager...")
@@ -109,11 +110,15 @@ class Eureka:
             env_type=env_type,
             task_type=task_type,
             parameters_to_tune=parameters_to_tune,
+            warmstart=warmstart,
         )
 
         # Logging
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self._log_dir = os.path.join(EUREKA_ROOT_DIR, "logs", "eureka", task, timestamp)
+        if warmstart:
+            self._log_dir = os.path.join(EUREKA_ROOT_DIR, "logs", "eureka", task, task_type, "warmstart", timestamp)
+        else:
+            self._log_dir = os.path.join(EUREKA_ROOT_DIR, "logs", "eureka", task, task_type, timestamp)
         os.makedirs(self._log_dir)
         self._tensorboard_writer = TensorboardSummaryWriter(log_dir=self._log_dir, flush_secs=10)
     
@@ -180,7 +185,12 @@ class Eureka:
         """
         # Initial prompts
         # temporary fix, bc with weight tuning the initial prompt is not used
-        context_code_string = self.read_source_code(self._task_manager._task)
+        context_code_string = self.read_env_source_code(self._task_manager._task)
+        ppo_algo_code_string = self.read_ppo_source_code(self._task_manager._rl_library)
+        if self._task_manager._task_type == "reward_weight_tuning":
+            self._llm_manager.feed_context_code(context_code_string)
+        if self._task_manager._task_type == "ppo_tuning":
+            self._llm_manager.feed_context_code(ppo_algo_code_string)
         if self._task_manager._task_type == "ppo_tuning":
             user_prompt = MANAGER_BASED_PPO_TUNING_TASK_PROMPT.format(
                 task_description=self._task_description,
@@ -208,6 +218,10 @@ class Eureka:
             # Get new weights from LLM, from iter==1
             llm_outputs = self._llm_manager.prompt_weights(user_prompt=user_prompt, assistant_prompt=assistant_prompt)
             gpt_weight_strings = llm_outputs["weight_strings"]
+            if iter == 0 and self._task_manager._warmstart:
+                # if warmstart, overwrite gpt_weight_strings with the initial tuning string
+                for i in range(len(gpt_weight_strings)):
+                    gpt_weight_strings[i] = self._task_manager._get_initial_tuning_as_string
             # Log the llm outputs
             for idx, gpt_reward_method_string in enumerate(gpt_weight_strings):
                 self._tensorboard_writer.add_text(f"Run_{idx}/raw_llm_output", gpt_reward_method_string, iter)
@@ -232,7 +246,7 @@ class Eureka:
             assistant_prompt = results[best_run_idx]["assistant_prompt"]
             user_prompt = results[best_run_idx]["user_prompt"]
 
-        self._log_final_results(best_run_results, max_eureka_iterations)
+        self._log_final_results(best_run_results, iter)
         # Close the task manager
         self._task_manager.close()
 
@@ -399,9 +413,13 @@ class Eureka:
         # write the iterations results to file
         with open(f"{self._log_dir}/eureka_iterations.txt", "a") as f:
             for idx, result in enumerate(results):
+                if iter == 0 and self._task_manager._warmstart:
+                    f.write(f"Using Warmstart\n")
                 f.write(f"{'#' * 20} Iteration: {iter} {'#' * 20}\n\n")
                 f.write(f"{'*' * 20} Run: {idx} {'*' * 20}\n")
                 f.write(f"- GPT reward method {result['assistant_prompt']}\n")
+                if not (iter == 0 and self._task_manager._warmstart):
+                    f.write(f"GPT reasoning:\n{result['raw_llm_output']}\n")
                 if result["success"]:
                     f.write(f"Training successful with the following metrics:\n{result['eureka_task_feedback']}\n")
                     f.write(f"Reward correlation with oracle rewards:\n{result['rewards_correlation']}\n")
@@ -412,9 +430,11 @@ class Eureka:
                 self._tensorboard_writer.add_text(f"Run_{idx}/run_feedback", result["user_prompt"], iter)
                 f.write("\n")
 
-    def _log_final_results(self, best_run_results: dict, max_eureka_iterations):
+    def _log_final_results(self, best_run_results: dict, iter):
         """Log the final results of the Eureka run."""
         output = ""
+        if self._task_manager._warmstart:
+            output += f"Using Warmstart\n"
         if best_run_results["success_metric"] is not None:
             output += f"- Success metric: {best_run_results['success_metric']}\n"
             output += f"- GPT reward method: {best_run_results['gpt_reward_method']}\n"
@@ -422,7 +442,7 @@ class Eureka:
         else:
             output += "- No successful training run\n"
         
-        output += f"For {self._task_manager._env_type}, {self._num_processes} parallel prompting, {max_eureka_iterations} eureka iterations."
+        output += f"For {self._task_manager._env_type}, {self._num_processes} parallel prompting, {iter} eureka iterations."
         output += f"Total token usage: {self._llm_manager._total_tokens}\n"
         output += f"Input token usage: {self._llm_manager._total_query_tokens}\n"
         output += f"Output token usage: {self._llm_manager._total_response_tokens}\n"
@@ -539,12 +559,14 @@ class Eureka:
             # Add the prompts
             results[idx]["user_prompt"] = user_feedback_prompt
             results[idx]["assistant_prompt"] = gpt_reward_method_strings[idx]
+            results[idx]["raw_llm_output"] = llm_outputs["raw_outputs"][idx]
         return results, best_run_results, best_run_idx
     
     def _get_system_prompt(self, env_type, task_type) -> str:
         """Determine the appropriate system prompt based on env_type and task_type."""
+
         prompts = {
-            ("manager_based", "reward_weight_tuning"): MANAGER_BASED_WEIGHT_TUNING_INITIAL_PROMPT,
+            ("manager_based", "reward_weight_tuning"): MANAGER_BASED_WEIGHT_TUNING_INITIAL_PROMPT + f'\n NEVER change reward weight for {self.task_success_reward_name} term. This term is used to compute task success metric. Changing its weight is the same as cheating the task success metric.',
             ("manager_based", "ppo_tuning"): MANAGER_BASED_PPO_TUNING_INITIAL_PROMPT,
             ("direct", "reward_weight_tuning"): DIRECT_WORKFLOW_INITIAL_PROMPT,
         }
@@ -554,7 +576,7 @@ class Eureka:
     
     
 
-    def read_source_code(self, task):
+    def read_env_source_code(self, task):
         """Recursively read all .py files in the mdp and task-specific directory inside IsaacLab."""
         import re
         base_dir = "/workspace/isaaclab/source/isaaclab_tasks/isaaclab_tasks/sbtc/manager_based"
@@ -604,3 +626,22 @@ class Eureka:
                     collected_code.append(f"\n---- {file} ----\n{file_content}\n")
 
         return "\n".join(collected_code)
+    
+    def read_ppo_source_code(self, rl_library: str) -> str:
+        """Read the PPO source code of the given RL library and return it as a string."""
+        ppo_paths = {
+            "rsl_rl": "/workspace/isaaclab/_isaac_sim/kit/python/lib/python3.10/site-packages/rsl_rl/algorithms/ppo.py",
+            "skrl": "/workspace/isaaclab/_isaac_sim/kit/python/lib/python3.10/site-packages/skrl/agents/torch/ppo/ppo.py",
+        }
+
+        if rl_library not in ppo_paths:
+            raise ValueError(f"Unsupported RL library: {rl_library}. Choose from {list(ppo_paths.keys())}")
+
+        ppo_file_path = ppo_paths[rl_library]
+        intro=f"Here is the source code of the PPO algorithm in {rl_library} library. Try to understand what each hyperparameter does.\n"
+        try:
+            with open(ppo_file_path, "r", encoding="utf-8") as f:
+                source_code = f.read()
+            return intro + source_code
+        except FileNotFoundError:
+            raise FileNotFoundError(f"PPO source code not found at {ppo_file_path}")

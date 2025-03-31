@@ -18,35 +18,28 @@ num_envs: 1024 # choose appropriate value for task(lift or unscrew)
 max_training_iterations: 1500 # RL iteration, choose appropriate value for task(lift or unscrew)
 feedback_subsampling: 150 # best to choose max_training_iterations/10. subsampling of training result/history, later given to llm 
 env_type: "manager_based" # "manager_based" or "direct"
-task_type: "ppo_tuning" # "ppo_tuning" or "reward_weight_tuning"
+task_type: "rewrard_weight_tuning" # "ppo_tuning" or "reward_weight_tuning"
 
 # "rsl_rl" , "rl_games",  "skrl" supported for "reward_weight_tuning", 
 # "rsl_rl" , "skrl" supported for "ppo_tuning"
-rl_library: "skrl" 
+rl_library: "rsl_rl" 
 
 # only for ppo_tuning
 # your choice of parameters to tune
 # parameters should be library-specific and represent the nested structure
+# parameters_to_tune: 
+#   - "models.policy.clip_actions"
+#   - "models.policy.min_log_std"
+#   - "agent.discount_factor"
+#   - "agent.learning_rate"
+#   - "agent.learning_rate_scheduler_kwargs.kl_threshold"
+#   - "agent.kl_threshold"
 
-# for skrl
-
-parameters_to_tune: 
-  - "agent.learning_rate"
-  - "agent.entropy_loss_scale"
-  - "agent.kl_threshold"
-  - "agent.lambda"
-  - "agent.learning_rate_scheduler_kwargs.kl_threshold"
-  - "agent.kl_threshold"
-  - "models.policy.clip_actions"
-  - "models.policy.min_log_std"
-
-
-# for rsl_rl
-
-parameters_to_tune: 
-  - "algorithm.clip_param"
-  - "algorithm.entropy_coef"
-  - "algorithm.desired_kl"
-  - "algorithm.learning_rate"
-  - "algorithm.use_clipped_value_loss"
-  - "policy.init_noise_std"
+# ex for rsl_rl
+# parameters_to_tune: 
+#   - "algorithm.clip_param"
+#   - "algorithm.entropy_coef"
+#   - "algorithm.desired_kl"
+#   - "algorithm.learning_rate"
+#   - "algorithm.use_clipped_value_loss"
+#   - "policy.init_noise_std"
