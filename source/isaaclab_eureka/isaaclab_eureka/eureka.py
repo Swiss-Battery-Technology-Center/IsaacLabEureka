@@ -5,6 +5,7 @@
 import datetime
 import numpy as np
 import os
+import textwrap
 from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 from typing import Literal
 
@@ -51,6 +52,7 @@ class Eureka:
         task_type: str = "reward_weight_tuning",
         parameters_to_tune: list[str] = [],
         warmstart:bool = False,
+        num_envs: int = 1024, 
     ):
         """Initialize the Eureka class.
 
@@ -111,6 +113,7 @@ class Eureka:
             task_type=task_type,
             parameters_to_tune=parameters_to_tune,
             warmstart=warmstart,
+            num_envs=num_envs,
         )
 
         # Logging
@@ -243,7 +246,7 @@ class Eureka:
                 print(f"Task solved with success metric: {best_run_results['success_metric']}")
                 break
 
-            assistant_prompt = results[best_run_idx]["assistant_prompt"]
+            assistant_prompt = results[best_run_idx]["assistant_prompt"] if iter == 0 else results[best_run_idx]["assistant_prompt"] + results[best_run_idx]["raw_llm_output"]
             user_prompt = results[best_run_idx]["user_prompt"]
 
         self._log_final_results(best_run_results, iter)
@@ -398,6 +401,9 @@ class Eureka:
                 total_feed_back_string += feedback_string
 
         total_feed_back_string += f"\nThe desired task_score to win is: {self._success_metric_to_win:.2f}\n"
+        total_feed_back_string += f"Training had {self._task_manager._max_training_iterations} learning iterations in total. Each metric was sampled at every {self._feedback_subsampling} learning iterations.\n"
+        total_feed_back_string += f"Note that a curriculum may have been setup to change reward weights to a certain value after a certain number of training iterations.\n"
+        total_feed_back_string += f"If you see a reward term dramatically changing its magnitude order, a curriculum might have been at play.\n"
         return total_feed_back_string, success_metric_max, 0
 
     def _log_iteration_results(self, iter: int, results: list):
@@ -422,7 +428,8 @@ class Eureka:
                 f.write(f"{'*' * 20} Run: {idx} {'*' * 20}\n")
                 f.write(f"- GPT reward method {result['assistant_prompt']}\n")
                 if not (iter == 0 and self._task_manager._warmstart):
-                    f.write(f"GPT reasoning:\n{result['raw_llm_output']}\n")
+                    wrapped_output = textwrap.fill(result["raw_llm_output"], width=100)
+                    f.write(f"GPT reasoning:\n{wrapped_output}\n\n")
                 if result["success"]:
                     f.write(f"Training successful with the following metrics:\n{result['eureka_task_feedback']}\n")
                     f.write(f"Reward correlation with oracle rewards:\n{result['rewards_correlation']}\n")

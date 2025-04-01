@@ -9,6 +9,7 @@ import os
 import traceback
 import types
 import ast
+import copy
 from contextlib import nullcontext
 from datetime import datetime
 from typing import Literal
@@ -95,6 +96,7 @@ class EurekaTaskManager:
         task_type: str = "",
         parameters_to_tune: list[str] = [],
         warmstart: bool = False,
+        num_envs: int = 1024,
     ):
         """Initialize the task manager. Each process will create an independent training run.
 
@@ -120,6 +122,7 @@ class EurekaTaskManager:
         self._task_type = task_type
         self._parameters_to_tune = parameters_to_tune
         self._warmstart = warmstart
+        self._num_envs = num_envs
         self._processes = dict()
         # Used to communicate the reward functions to the processes
         self._rewards_queues = [multiprocessing.Queue() for _ in range(self._num_processes)]
@@ -248,29 +251,60 @@ class EurekaTaskManager:
         self._simulation_app.close()
 
     def _create_environment(self):
-        """Create the environment for the task."""
         from isaaclab.app import AppLauncher
-
         if self._device == "cuda":
             device_id = get_freest_gpu()
             self._device = f"cuda:{device_id}"
         app_launcher = AppLauncher(headless=True, device=self._device)
         self._simulation_app = app_launcher.app
-
-        import gymnasium as gym
-
+            
         import isaaclab_tasks  # noqa: F401
-        from isaaclab.envs import DirectRLEnvCfg, ManagerBasedRLEnv
+        from isaaclab.envs import DirectRLEnvCfg, ManagerBasedRLEnvCfg
         from isaaclab_tasks.utils import parse_env_cfg
-
+        import gymnasium as gym
+        # Load fresh env config from registry (avoids curriculum side effects)
         if self._env_type == "manager_based":
-            env_cfg: ManagerBasedRLEnv = parse_env_cfg(self._task)
-        else: 
+            env_cfg: ManagerBasedRLEnvCfg = parse_env_cfg(self._task)
+        else:
             env_cfg: DirectRLEnvCfg = parse_env_cfg(self._task)
 
         env_cfg.sim.device = self._device
         env_cfg.seed = self._env_seed
+        env_cfg.scene.num_envs = self._num_envs  # ensure consistency
+        self._original_env_cfg = copy.deepcopy(env_cfg)
+        # Create new env
         self._env = gym.make(self._task, cfg=env_cfg)
+
+    def _reset_all_envs(self):
+        if not hasattr(self, "_env") or self._env is None:
+            return
+
+        import torch, copy
+
+        env = self._env.unwrapped
+        reset_env_ids = torch.arange(env.num_envs, device=env.device)
+
+        # Reset state
+        env.recorder_manager.record_pre_reset(reset_env_ids)
+        env._reset_idx(reset_env_ids)
+        env.scene.write_data_to_sim()
+        env.sim.forward()
+        if env.sim.has_rtx_sensors() and env.cfg.rerender_on_reset:
+            env.sim.render()
+        env.recorder_manager.record_post_reset(reset_env_ids)
+        env.common_step_counter = 0
+        env.episode_length_buf[:] = 0
+
+        # Restore original reward cfg
+        original_cfg = self._original_env_cfg
+        try:
+            from isaaclab.managers import RewardManager,EventManager
+            env.reward_manager = RewardManager(original_cfg.rewards, env)
+            env.event_manager = EventManager(original_cfg.events, env)
+        except Exception as e:
+            print(f"[ERROR] Failed to make a new reward manager: {e}")
+
+        print(f"[INFO] Reset all envs and restored original cfg.")
 
     def _prepare_eureka_environment(self, get_rewards_method_as_string: str):
         """Prepare the environment for training with the Eureka-generated reward function.
@@ -322,7 +356,6 @@ class EurekaTaskManager:
         self._has_sent_initial_tuning = False
         self._eureka_iter = 0
         while not self.termination_event.is_set():
-            # first run, doesn't call llm, just create and run training
             if not hasattr(self, "_env"):
                 self._create_environment()
                 if self._idx == 0 and not self._has_sent_initial_tuning:
@@ -333,6 +366,7 @@ class EurekaTaskManager:
                         self._initial_tuning_as_string = self._get_initial_ppo_params()
                         self._initial_tuning_queue.put(self._initial_tuning_as_string)
                     self._has_sent_initial_tuning = True
+
             # uses new weights from llm
             # if weight string was not properly formatted, llm manager will return ""
             # do exception handling here
@@ -349,7 +383,8 @@ class EurekaTaskManager:
                             if set(self._parameters_to_tune) != set(llm_param_names):
                                 raise Exception(f"Parameter names {llm_param_names} in suggested tuning do not match the correct parameter names: {self._parameters_to_tune}")
                             self._ppo_param_string = new_weights_string
-                        self._run_training()        
+                        self._run_training()
+                        self._reset_all_envs()        
                     result = {"success": True, "log_dir": self._log_dir}
                 except Exception as e:
                     result = {"success": False, "exception": str(e)}    
@@ -374,6 +409,7 @@ class EurekaTaskManager:
         print(f"[INFO]: Run {self._idx} terminated.")
         self._env.close()
         self._simulation_app.close()
+
     def get_initial_tuning(self):
         rm = self._env.unwrapped.reward_manager
         initial_weights_dict = {name: cfg.weight for name, cfg in zip(rm._term_names, rm._term_cfgs)}
