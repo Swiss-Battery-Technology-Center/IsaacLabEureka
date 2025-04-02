@@ -18,11 +18,6 @@ if [ -f "$KEY_FILE" ]; then
         key=$(echo "$trimmed" | cut -d '=' -f1)
         value=$(echo "$trimmed" | cut -d '=' -f2-)
 
-        # If the value isn’t already quoted, add double quotes.
-        if [[ "$value" != \"* && "$value" != \'* ]]; then
-            value="\"$value\""
-        fi
-
         # Export the variable. The syntax below is valid in bash.
         export "$key=$value"
     done < "$KEY_FILE"
