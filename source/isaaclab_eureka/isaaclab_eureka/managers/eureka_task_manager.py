@@ -594,9 +594,7 @@ class EurekaTaskManager:
             runner = OnPolicyRunner(
                 env, agent_cfg_dict, log_dir=self._log_dir, device=agent_cfg.device
             )
-            env_cfg = self._env.unwrapped.cfg
-            dump_yaml(os.path.join(self._log_dir, "params", "env.yaml"), env_cfg)
-            dump_yaml(os.path.join(self._log_dir, "params", "agent.yaml"), agent_cfg)
+            dump_yaml(os.path.join(self._log_dir, "params", "agent.yaml"), agent_cfg_dict)
             runner.learn(
                 num_learning_iterations=agent_cfg.max_iterations,
                 init_at_random_ep_len=True,
@@ -726,8 +724,6 @@ class EurekaTaskManager:
             # configure and instantiate the skrl runner
             # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
             runner = Runner(env, agent_cfg)
-            env_cfg = self._env.unwrapped.cfg
-            dump_yaml(os.path.join(self._log_dir, "params", "env.yaml"), env_cfg)
             dump_yaml(os.path.join(self._log_dir, "params", "agent.yaml"), agent_cfg)
             # run training
             runner.run()
