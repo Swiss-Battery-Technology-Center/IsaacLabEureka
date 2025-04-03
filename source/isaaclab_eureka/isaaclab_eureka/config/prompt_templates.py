@@ -45,7 +45,7 @@ I will use regex pattern of the above structure to extract the reward term names
 Then I will use ast.literal_eval function to convert the string to a dictionary.
 Make sure your ppo hyperparameter tuning string is easy to extract.
 param_name is a string and must be enclosed by a single quote.
-param_name may contain dots, such as 'agent.learning_rate_scheduler_kwargs.kl_threshold". Dots indicate a deeper level of nested dictionary.
+param_name may contain dots, such as "agent.learning_rate_scheduler_kwargs.kl_threshold". Dots indicate a deeper level of nested dictionary.
 value can be float or boolean.
 Assistant prompt provides the previous configuration of ppo hyperparameter names and values.
 Only use the exact same param_names from the previous configuration with correct value type. Do not introduce new parameters or remove existing ones.
@@ -89,15 +89,15 @@ Executing the reward function code above has the following error: {traceback_msg
 Please fix the bug and provide a new, improved reward function!
 """ + DIRECT_WORKFLOW_REWARD_FORMATTING_INSTRUCTIONS
 
-WEIGHT_TUNING_TASK_FAILURE_FEEDBACK_PROMPT = """
-Training with previous reward weight configuration above has the following error: {traceback_msg}.
+WEIGHT_TUNING_TASK_FAILURE_FEEDBACK_PROMPT = MANAGER_BASED_WEIGHT_TUNING_FORMATTING_INSTRUCTIONS + """
+Training with previous reward weight configuration above has the following error and dind't reach the maximum learning iterations.
 Please fix the bug and provide a new, improved tuning of reward terms.
-""" + MANAGER_BASED_WEIGHT_TUNING_FORMATTING_INSTRUCTIONS
+""" 
 
-PPO_TUNING_TASK_FAILURE_FEEDBACK_PROMPT = """
-Training with previous ppo hyperparameter configuration above has the following error: {traceback_msg}.
+PPO_TUNING_TASK_FAILURE_FEEDBACK_PROMPT = MANAGER_BASED_PPO_TUNING_FORMATTING_INSTRUCTIONS +"""
+Training with previous ppo hyperparameter configuration above has the following error and didn't reach the maximum learning iterations.
 Please fix the bug and provide a new, improved tuning of ppo hyperparameters.
-""" + MANAGER_BASED_PPO_TUNING_FORMATTING_INSTRUCTIONS
+""" 
 
 TASK_SUCCESS_PRE_FEEDBACK_PROMPT = """
 We trained a RL policy using the provided reward function code and tracked the values of the individual components in the reward function as well as global policy metrics such as success rates and episode lengths after every {feedback_subsampling} epochs and the maximum, mean, minimum values encountered:

@@ -22,7 +22,7 @@ feedback_subsampling: 80 # best to choose max_training_iterations/10. subsamplin
 
 env_type: "manager_based" # "manager_based" or "direct"
 task_type: "ppo_tuning" # "ppo_tuning" or "reward_weight_tuning"
-warmstart: True # True will use SBTC tuning for the first RL training
+warmstart: False # True will use SBTC tuning for the first RL training
 
 # "rsl_rl" , "rl_games",  "skrl" supported for "reward_weight_tuning", 
 # "rsl_rl" , "skrl" supported for "ppo_tuning"

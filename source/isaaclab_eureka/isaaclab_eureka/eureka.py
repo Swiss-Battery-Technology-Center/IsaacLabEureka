@@ -136,6 +136,7 @@ class Eureka:
                 "warmstart",
                 timestamp,
             )
+
         else:
             self._log_dir = os.path.join(
                 EUREKA_ROOT_DIR,
@@ -426,6 +427,7 @@ class Eureka:
 
         # Overwrite Eureka/success_metric with the correct reward term data
         data[success_metric_key] = data[reward_term_key]
+        actual_training_iterations = len(data[success_metric_key])
         # TODO really need to clean this up
         total_feed_back_string = ""
         if self._task_manager._task_type == "reward_weight_tuning":
@@ -514,7 +516,8 @@ class Eureka:
         total_feed_back_string += (
             f"\nThe desired task_score to win is: {self._success_metric_to_win:.2f}\n"
         )
-        total_feed_back_string += f"Training had {self._task_manager._max_training_iterations} learning iterations in total. Each metric was sampled at every {self._feedback_subsampling} learning iterations.\n"
+        total_feed_back_string += f"Each metric was sampled at every {self._feedback_subsampling} learning iterations.\n"
+        total_feed_back_string += f"Max learning iteration was set to {self._task_manager._max_training_iterations}, and the actual training had {actual_training_iterations} learning iterations.\n"
         total_feed_back_string += f"Note that a curriculum may have been setup to change reward weights to a certain value after a certain number of training iterations.\n"
         total_feed_back_string += f"If you see a reward term dramatically changing its magnitude order, a curriculum might have been at play.\n"
         return total_feed_back_string, success_metric_max, 0
@@ -553,9 +556,9 @@ class Eureka:
                     f.write(
                         f"Training successful with the following metrics:\n{result['eureka_task_feedback']}\n"
                     )
-                    f.write(
-                        f"Reward correlation with oracle rewards:\n{result['rewards_correlation']}\n"
-                    )
+                    # f.write(
+                    #     f"Reward correlation with oracle rewards:\n{result['rewards_correlation']}\n"
+                    # )
                     self._tensorboard_writer.add_scalar(
                         f"Run_{idx}/success_metric", result["success_metric_max"], iter
                     )
@@ -563,8 +566,11 @@ class Eureka:
                     f.write(
                         f"Training failed with the following exception:\n{result['exception']}\n"
                     )
+                    f.write(
+                        f"Training metrics are:\n{result['eureka_task_feedback']}\n"
+                    )
                     self._tensorboard_writer.add_scalar(
-                        f"Run_{idx}/success_metric", 0.0, iter
+                        f"Run_{idx}/success_metric", result["success_metric_max"], iter
                     )
                 self._tensorboard_writer.add_text(
                     f"Run_{idx}/run_feedback", result["user_prompt"], iter
@@ -676,27 +682,27 @@ class Eureka:
         best_run_idx = 0
 
         for idx, result in enumerate(results):
+                # Compute the performance metrics
+            eureka_task_feedback, success_metric_max, rewards_correlation = (
+                self._get_eureka_task_feedback_manager_based(
+                    result["log_dir"], self._feedback_subsampling
+                )
+            )
             if not result["success"]:
                 if self._task_manager._task_type == "reward_weight_tuning":
                     user_feedback_prompt = (
-                        WEIGHT_TUNING_TASK_FAILURE_FEEDBACK_PROMPT.format(
-                            traceback_msg=result["exception"]
-                        )
+                        WEIGHT_TUNING_TASK_FAILURE_FEEDBACK_PROMPT 
+                        + result["exception"] 
+                        + eureka_task_feedback
                     )
+                
                 if self._task_manager._task_type == "ppo_tuning":
                     user_feedback_prompt = (
-                        PPO_TUNING_TASK_FAILURE_FEEDBACK_PROMPT.format(
-                            traceback_msg=result["exception"]
-                        )
+                        PPO_TUNING_TASK_FAILURE_FEEDBACK_PROMPT 
+                        + result["exception"] 
+                        + eureka_task_feedback
                     )
             else:
-                # Compute the performance metrics
-                eureka_task_feedback, success_metric_max, rewards_correlation = (
-                    self._get_eureka_task_feedback_manager_based(
-                        result["log_dir"], self._feedback_subsampling
-                    )
-                )
-
                 # Generate the user feedback prompt
                 if self._task_manager._task_type == "reward_weight_tuning":
                     user_feedback_prompt = (
@@ -716,38 +722,38 @@ class Eureka:
                     )
 
                 # Store the results
-                results[idx]["eureka_task_feedback"] = eureka_task_feedback
-                results[idx]["success_metric_max"] = success_metric_max
-                results[idx]["rewards_correlation"] = rewards_correlation
+            results[idx]["eureka_task_feedback"] = eureka_task_feedback
+            results[idx]["success_metric_max"] = success_metric_max
+            results[idx]["rewards_correlation"] = rewards_correlation
 
                 # Check the best performing metric, determined by the minimum distance from the win target
-                if success_metric_max is not None and (
-                    iter_best_success_metric is None
-                    or np.abs(success_metric_max - self._success_metric_to_win)
-                    < np.abs(iter_best_success_metric - self._success_metric_to_win)
-                ):
-                    # Store the best run for this iteration
-                    iter_best_success_metric = success_metric_max
-                    best_run_idx = idx
+            if success_metric_max is not None and (
+                iter_best_success_metric is None
+                or np.abs(success_metric_max - self._success_metric_to_win)
+                < np.abs(iter_best_success_metric - self._success_metric_to_win)
+            ):
+                # Store the best run for this iteration
+                iter_best_success_metric = success_metric_max
+                best_run_idx = idx
 
-                    # Store the best metric across all iterations
-                    if best_run_results["success_metric"] is None or (
-                        np.abs(iter_best_success_metric - self._success_metric_to_win)
-                        < np.abs(
-                            best_run_results["success_metric"]
-                            - self._success_metric_to_win
-                        )
-                    ):
-                        best_run_results["success_metric"] = iter_best_success_metric
-                        best_run_results["gpt_reward_method"] = (
-                            gpt_reward_method_strings[idx]
-                        )
-                        best_run_results["task_feedback"] = eureka_task_feedback
+            # Store the best metric across all iterations
+            if best_run_results["success_metric"] is None or (
+                np.abs(iter_best_success_metric - self._success_metric_to_win)
+                < np.abs(
+                    best_run_results["success_metric"]
+                    - self._success_metric_to_win
+                )
+            ):
+                best_run_results["success_metric"] = iter_best_success_metric
+                best_run_results["gpt_reward_method"] = (
+                    gpt_reward_method_strings[idx]
+                )
+                best_run_results["task_feedback"] = eureka_task_feedback
 
-            # Add the prompts
-            results[idx]["user_prompt"] = user_feedback_prompt
-            results[idx]["assistant_prompt"] = gpt_reward_method_strings[idx]
-            results[idx]["raw_llm_output"] = llm_outputs["raw_outputs"][idx]
+        # Add the prompts
+        results[idx]["user_prompt"] = user_feedback_prompt
+        results[idx]["assistant_prompt"] = gpt_reward_method_strings[idx]
+        results[idx]["raw_llm_output"] = llm_outputs["raw_outputs"][idx]
         return results, best_run_results, best_run_idx
 
     def _get_system_prompt(self, env_type, task_type) -> str:

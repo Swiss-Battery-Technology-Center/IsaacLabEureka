@@ -432,7 +432,7 @@ class EurekaTaskManager:
                         self._reset_all_envs()
                     result = {"success": True, "log_dir": self._log_dir}
                 except Exception as e:
-                    result = {"success": False, "exception": str(e)}
+                    result = {"success": False, "exception": str(e), "log_dir": self._log_dir}
                     print(traceback.format_exc())
             else:
                 result = {
@@ -563,7 +563,7 @@ class EurekaTaskManager:
             agent_cfg.max_iterations = self._max_training_iterations
 
             log_root_path = os.path.join(
-                "logs", "eureka", "rsl_rl", agent_cfg.experiment_name, self._task_type
+                EUREKA_ROOT_DIR, "logs", "rl_runs", "rsl_rl_eureka", agent_cfg.experiment_name, self._task_type
             )
             log_root_path = os.path.abspath(log_root_path)
             if self._warmstart:
@@ -613,9 +613,10 @@ class EurekaTaskManager:
             agent_cfg["params"]["config"]["device_name"] = self._device
             # specify directory for logging experiments
             log_root_path = os.path.join(
+                EUREKA_ROOT_DIR,
                 "logs",
-                "eureka",
-                "rl_games",
+                "rl_runs",
+                "rl_games_eureka",
                 agent_cfg["params"]["config"]["name"],
                 self._task_type,
             )
@@ -681,9 +682,10 @@ class EurekaTaskManager:
 
             # specify directory for logging experiments
             log_root_path = os.path.join(
+                EUREKA_ROOT_DIR,
                 "logs",
-                "eureka",
-                "skrl",
+                "rl_runs",
+                "skrl_eureka",
                 agent_cfg["agent"]["experiment"]["directory"],
                 self._task_type,
             )
