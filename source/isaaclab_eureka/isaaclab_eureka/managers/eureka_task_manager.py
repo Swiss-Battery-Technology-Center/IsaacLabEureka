@@ -318,10 +318,13 @@ class EurekaTaskManager:
         # Restore original reward cfg
         original_cfg = self._original_env_cfg
         try:
-            from isaaclab.managers import RewardManager, EventManager
-
-            env.reward_manager = RewardManager(original_cfg.rewards, env)
+            from isaaclab.managers import EventManager, CommandManager, ActionManager, ObservationManager, TerminationManager, RewardManager
             env.event_manager = EventManager(original_cfg.events, env)
+            env.command_manager: CommandManager = CommandManager(original_cfg.commands, env)
+            env.action_manager = ActionManager(original_cfg.actions, env)
+            env.observation_manager = ObservationManager(original_cfg.observations, env)
+            env.termination_manager = TerminationManager(original_cfg.terminations, env)
+            env.reward_manager = RewardManager(original_cfg.rewards, env)
         except Exception as e:
             print(f"[ERROR] Failed to make a new reward manager: {e}")
 
@@ -429,9 +432,16 @@ class EurekaTaskManager:
                                 )
                             self._ppo_param_string = new_weights_string
                         self._run_training()
+                        
+                        # this line will not run if training fails, so run it in except block as well
                         self._reset_all_envs()
                     result = {"success": True, "log_dir": self._log_dir}
                 except Exception as e:
+                    import torch
+                    # flush any singular matrix
+                    torch.cuda.empty_cache()
+
+                    self._reset_all_envs()
                     result = {"success": False, "exception": str(e), "log_dir": self._log_dir}
                     print(traceback.format_exc())
             else:
