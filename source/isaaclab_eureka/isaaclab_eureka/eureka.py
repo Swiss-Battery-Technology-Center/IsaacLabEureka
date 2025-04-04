@@ -428,6 +428,7 @@ class Eureka:
         # Overwrite Eureka/success_metric with the correct reward term data
         data[success_metric_key] = data[reward_term_key]
         actual_training_iterations = len(data[success_metric_key])
+        adaptive_feedback_subsampling = actual_training_iterations // feedback_subsampling
         # TODO really need to clean this up
         total_feed_back_string = ""
         if self._task_manager._task_type == "reward_weight_tuning":
@@ -443,7 +444,7 @@ class Eureka:
                     metric_max = max(metric_data)
                     metric_mean = sum(metric_data) / len(metric_data)
                     data_string = [
-                        f"{data:.2f}" for data in metric_data[::feedback_subsampling]
+                        f"{data:.2f}" for data in metric_data[::adaptive_feedback_subsampling]
                     ]
                     feedback_string = (
                         f"{metric_name}: {data_string}, Min: {metric_min:.2f}, Max: {metric_max:.2f}, Mean:"
@@ -472,7 +473,7 @@ class Eureka:
                         ]
                         success_metric_max = metric_best
                     data_string = [
-                        f"{data:.2f}" for data in metric_data[::feedback_subsampling]
+                        f"{data:.2f}" for data in metric_data[::adaptive_feedback_subsampling]
                     ]
                     feedback_string = (
                         f"{metric_name}: {data_string}, Min: {metric_min:.2f}, Max: {metric_max:.2f}, Mean:"
@@ -499,7 +500,7 @@ class Eureka:
                     ]
                     success_metric_max = metric_best
                 data_string = [
-                    f"{data:.2f}" for data in metric_data[::feedback_subsampling]
+                    f"{data:.2f}" for data in metric_data[::adaptive_feedback_subsampling]
                 ]
                 feedback_string = (
                     f"{metric_name}: {data_string}, Min: {metric_min:.2f}, Max: {metric_max:.2f}, Mean:"
@@ -516,7 +517,7 @@ class Eureka:
         total_feed_back_string += (
             f"\nThe desired task_score to win is: {self._success_metric_to_win:.2f}\n"
         )
-        total_feed_back_string += f"Each metric was sampled at every {self._feedback_subsampling} learning iterations.\n"
+        total_feed_back_string += f"Each metric was sampled at every {adaptive_feedback_subsampling} learning iterations.\n"
         total_feed_back_string += f"Max learning iteration was set to {self._task_manager._max_training_iterations}, and the actual training had {actual_training_iterations} learning iterations.\n"
         total_feed_back_string += f"Note that a curriculum may have been setup to change reward weights to a certain value after a certain number of training iterations.\n"
         total_feed_back_string += f"If you see a reward term dramatically changing its magnitude order, a curriculum might have been at play.\n"

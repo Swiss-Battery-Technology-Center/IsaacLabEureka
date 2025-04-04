@@ -103,10 +103,12 @@ TASK_SUCCESS_PRE_FEEDBACK_PROMPT = """
 We trained a RL policy using the provided reward function code and tracked the values of the individual components in the reward function as well as global policy metrics such as success rates and episode lengths after every {feedback_subsampling} epochs and the maximum, mean, minimum values encountered:
 """
 WEIGHT_TUNING_TASK_SUCCESS_PRE_FEEDBACK_PROMPT = """
-We trained a RL policy using the provided weights for reward terms and tracked the values of the individual reward components as well as global policy metrics such as task_score(which represent success rate) and episode lengths after every {feedback_subsampling} epochs and the maximum, mean, minimum values encountered:
+We trained a RL policy using the provided weights for reward terms and tracked the values of the individual reward components as well as other policy metrics such as task_score(which represent success rate) and loss. 
+We sampled it {feedback_subsampling} times evenly during training duration. We also tracked maximum, mean, minimum values encountered:
 """
 PPO_TUNING_TASK_SUCCESS_PRE_FEEDBACK_PROMPT = """
-We trained a RL policy using the provided tuning of ppo hyperparameters and tracked the values of the individual reward components, loss, etc as well as global policy metrics such as task_score(which represent success rate) and episode lengths after every {feedback_subsampling} epochs and the maximum, mean, minimum values encountered:
+We trained a RL policy using the provided tuning of ppo hyperparameters and tracked the values of the individual reward components as well as other policy metrics such as task_score(which represent success rate) and loss. 
+We sampled it {feedback_subsampling} times evenly during training duration. We also tracked maximum, mean, minimum values encountered:
 """
 TASK_SUCCESS_POST_FEEDBACK_PROMPT = """
 Please carefully analyze the policy feedback and provide a new, improved reward function that can better solve the task. Some helpful tips for analyzing the policy feedback:
