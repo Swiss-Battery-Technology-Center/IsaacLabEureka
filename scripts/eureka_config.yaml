@@ -17,7 +17,7 @@ temperature: 1
 # IsaacLab related arguments
 num_envs: 256 # choose appropriate value for task, 1024 for unscrew/lift
 
-max_training_iterations: 1500 # RL learning iterations, 800 for lift, 1500 for unscrew
+max_training_iterations: 10 # RL learning iterations, 800 for lift, 1500 for unscrew
 feedback_subsampling: 10 # adaptive to max learning iterations, 10 will sample 10 times during a full RL training, 20 will sample 20 times
 
 env_type: "manager_based" # "manager_based" or "direct"

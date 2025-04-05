@@ -476,12 +476,8 @@ class Eureka:
             f"\nThe desired task_score to win is: {self._success_metric_to_win:.2f}\n"
         )
         total_feed_back_string += f"The agent is trained using {self._task_manager._rl_library} library.\n"
-        if self._task_manager._rl_library == "skrl":
-            total_feed_back_string += f"Each metric was sampled at every {adaptive_feedback_subsampling} timesteps.\n"
-            total_feed_back_string += f"Max training timestep was set to {self._task_manager._max_training_iterations * self._task_manager._skrl_rollout}, and the actual training had {actual_training_iterations} timesteps.\n"
-        else:
-            total_feed_back_string += f"Each metric was sampled at every {adaptive_feedback_subsampling} learning iterations.\n"
-            total_feed_back_string += f"Max learning iteration was set to {self._task_manager._max_training_iterations}, and the actual training had {actual_training_iterations} learning iterations.\n"
+        total_feed_back_string += f"Each metric was sampled at every {adaptive_feedback_subsampling} learning iterations.\n"
+        total_feed_back_string += f"Max learning iteration was set to {self._task_manager._max_training_iterations}, and the actual training had {actual_training_iterations} learning iterations.\n"
         total_feed_back_string += f"Note that a curriculum may have been setup to change reward weights to a certain value after a certain number of training iterations.\n"
         total_feed_back_string += f"If you see a reward term dramatically changing its magnitude order, a curriculum might have been at play.\n"
         return total_feed_back_string, success_metric_max, 0
