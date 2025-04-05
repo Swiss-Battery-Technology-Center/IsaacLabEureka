@@ -144,12 +144,15 @@ class LLMManager:
 
             try:
                 # Send dummy query to register the prompt internally (ignore response)
+                print('CREATING CHAT COMPLETION TO FEED CONTEXT')
+
                 responses = self._client.chat.completions.create(
                     model=self._gpt_model,
                     messages=[{"role": "user", "content": full_prompt}],
                     temperature=self._temperature,
                     n=1,
                 )
+                print('CHAT COMPLETION SUCCESSFUL')
                 self._total_tokens += responses.usage.total_tokens
                 self._total_query_tokens += responses.usage.prompt_tokens
                 self._total_response_tokens += responses.usage.completion_tokens
@@ -185,12 +188,17 @@ class LLMManager:
             self._prompts.pop(2)
 
         try:
+            print('CREATING CHAT COMPLETION TO PROMPT WEIGHTS')
+            signal.signal(signal.SIGALRM, handler)
+            signal.alarm(60)  # Timeout after 60 seconds
             responses = self._client.chat.completions.create(
                 model=self._gpt_model,
                 messages=self._prompts,
                 temperature=self._temperature,
                 n=self._num_suggestions,
             )
+            signal.alarm(0)  # Cancel alarm if successful
+            print('CHAT COMPLETION SUCCESSFUL')
         except Exception as e:
             raise RuntimeError("An error occurred while prompting the LLM") from e
 
@@ -202,3 +210,10 @@ class LLMManager:
         self._total_response_tokens += responses.usage.completion_tokens
         return {"weight_strings": weights_strings, "raw_outputs": raw_outputs}
     
+import signal
+
+class TimeoutException(Exception): pass
+
+def handler(signum, frame):
+    raise TimeoutException("LLM call took too long!")
+

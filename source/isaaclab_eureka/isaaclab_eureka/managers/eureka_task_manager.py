@@ -126,6 +126,7 @@ class EurekaTaskManager:
         self._parameters_to_tune = parameters_to_tune
         self._warmstart = warmstart
         self._num_envs = num_envs
+        self._skrl_rollout=None
         self._processes = dict()
         # Used to communicate the reward functions to the processes
         self._rewards_queues = [
@@ -160,6 +161,7 @@ class EurekaTaskManager:
             self._get_observations_as_string = self._observations_queue.get()
         else:
             self._get_initial_tuning_as_string = self._initial_tuning_queue.get()
+            print("GET INITIAL TUNING AS STRING COMPLETE")
 
     @property
     def get_observations_method_as_string(self) -> str:
@@ -199,21 +201,26 @@ class EurekaTaskManager:
         """
         if get_rewards_method_as_string:
             # get_rewards_method_as_string is empty list [] at iter 0 of weight tuning, in which case we skip this part
-            if len(get_rewards_method_as_string) != self._num_processes:
+            if len(get_rewards_method_as_string) < self._num_processes:
                 raise ValueError(
-                    f"Number of reward methods in the list ({len(get_rewards_method_as_string)}) does not match the number"
+                    f"Number of reward methods in the list ({len(get_rewards_method_as_string)}) is smaller than the number"
                     f" of processes ({self._num_processes})."
                 )
+            elif len(get_rewards_method_as_string) > self._num_processes:
+                print("WARNING: Number of reward methods in the list is larger than the number of processes.\n "+
+                      f"Only the first {self._num_processes} responses will be used.")
 
             # Set the reward functions in each process
             for idx, rewards_queue in enumerate(self._rewards_queues):
                 rewards_queue.put(get_rewards_method_as_string[idx])
+            print("PUSHING LLM OUTPUT TO REWARDS QUEUE COMPLETE")
 
         results = [None] * self._num_processes
         # Wait for each process to finish and collect the results
         for _ in range(self._num_processes):
             idx, result = self._results_queue.get()
             results[idx] = result
+        print("PULLING FROM RESULTS QUEUE COMPLETE")
 
         return results
 
@@ -398,6 +405,7 @@ class EurekaTaskManager:
         while not self.termination_event.is_set():
             if not hasattr(self, "_env"):
                 self._create_environment()
+                print("SELF CREATE ENVIRONMENT COMPLETE")
                 if self._idx == 0 and not self._has_sent_initial_tuning:
                     if self._task_type == "reward_weight_tuning":
                         self._initial_tuning_as_string = self.get_initial_tuning()
@@ -406,11 +414,13 @@ class EurekaTaskManager:
                         self._initial_tuning_as_string = self._get_initial_ppo_params()
                         self._initial_tuning_queue.put(self._initial_tuning_as_string)
                     self._has_sent_initial_tuning = True
+                    print("PUSING INITIAL TUNING AS STRING COMPLETE")
 
             # uses new weights from llm
             # if weight string was not properly formatted, llm manager will return ""
             # do exception handling here
             new_weights_string = rewards_queue.get()
+            print("GOT NEW WEIGHTS STRING FROM REWARD QUEUE")
             if (
                 len(new_weights_string) > 0
             ):  # if not empty string, weight string is properly formatted
@@ -419,7 +429,9 @@ class EurekaTaskManager:
                         self._prepare_eureka_environment_reset_weights(
                             new_weights_string
                         )
+                        print("PREPARE EUREKA ENVIRONMENT RESET WEIGHTS COMPLETE")
                     self._prepare_eureka_environment_reset_idx()
+                    print("PREPARE EUREKA ENVIRONMENT RESET IDX COMPLETE")
                     context = MuteOutput() if self._idx > 0 else nullcontext()
                     with context:
                         if self._task_type == "ppo_tuning":
@@ -431,17 +443,20 @@ class EurekaTaskManager:
                                     f"Parameter names {llm_param_names} in suggested tuning do not match the correct parameter names: {self._parameters_to_tune}"
                                 )
                             self._ppo_param_string = new_weights_string
+                            print('SELF PPO PARAM STRING COMPLETE')
+                        print("STARTING RUN TRAINING")
                         self._run_training()
-                        
+                        print("RUN TRAINING COMPLETE")
                         # this line will not run if training fails, so run it in except block as well
+                        print("RESETTING ALL ENVS")
                         self._reset_all_envs()
+                        print("RESET ALL ENVS COMPLETE")
                     result = {"success": True, "log_dir": self._log_dir}
                 except Exception as e:
-                    import torch
-                    # flush any singular matrix
-                    torch.cuda.empty_cache()
-
+                    # torch.cuda.empty_cache()
+                    print("TRAINING FAILED, RESETTING ALL ENVS")
                     self._reset_all_envs()
+                    print("RESET ALL ENVS COMPLETE")
                     result = {"success": False, "exception": str(e), "log_dir": self._log_dir}
                     print(traceback.format_exc())
             else:
@@ -465,6 +480,7 @@ class EurekaTaskManager:
             result["prev_weights_str"] = repr(prev_weights_dict)
             self._eureka_iter += 1
             self._results_queue.put((self._idx, result))
+            print("PUSHING TO RESULTS QUEUE COMPLETE")
         # Clean up
         print(f"[INFO]: Run {self._idx} terminated.")
         self._env.close()
@@ -569,6 +585,7 @@ class EurekaTaskManager:
             agent_cfg: RslRlOnPolicyRunnerCfg = load_cfg_from_registry(
                 self._task, "rsl_rl_cfg_entry_point"
             )
+            print("LOAD CONFIG FROM REGISTRY COMPLETE")
             agent_cfg.device = self._device
             agent_cfg.max_iterations = self._max_training_iterations
 
@@ -591,6 +608,7 @@ class EurekaTaskManager:
             self._log_dir = os.path.join(log_root_path, log_dir)
 
             env = RslRlVecEnvWrapper(self._env)
+            print("RSL RL VEC ENV WRAPPER COMPLETE")
             agent_cfg_dict = agent_cfg.to_dict()
             if self._task_type == "ppo_tuning":
                 # update the agent configuration with the ppo tuning parameters
@@ -605,6 +623,7 @@ class EurekaTaskManager:
                 env, agent_cfg_dict, log_dir=self._log_dir, device=agent_cfg.device
             )
             dump_yaml(os.path.join(self._log_dir, "params", "agent.yaml"), agent_cfg_dict)
+            print("DUMP YAML COMPLETE")
             runner.learn(
                 num_learning_iterations=agent_cfg.max_iterations,
                 init_at_random_ep_len=True,
@@ -680,11 +699,15 @@ class EurekaTaskManager:
 
             # max iterations for training
             agent_cfg = load_cfg_from_registry(self._task, "skrl_cfg_entry_point")
+            print("LOAD CONFIG FROM REGISTRY COMPLETE")
             agent_cfg["trainer"]["timesteps"] = (
                 self._max_training_iterations * agent_cfg["agent"]["rollouts"]
             )
+            rollouts = agent_cfg["agent"]["rollouts"]
+            print(f"SKRL TRAINER TIMESTEPS: {self._max_training_iterations * rollouts}")
+            print(f"SKRL AGENT ROLLOUTS: {rollouts}")
+            self._skrl_rollout = agent_cfg["agent"]["rollouts"]
             agent_cfg["trainer"]["close_environment_at_exit"] = False
-
             # set the agent and environment seed from command line
             # note: certain randomization occur in the environment initialization so we set the seed here
             agent_cfg["seed"] = self._env_seed
@@ -724,6 +747,7 @@ class EurekaTaskManager:
             env = SkrlVecEnvWrapper(
                 self._env
             )  # ml_framework="torch", wrapper="isaaclab" by default
+            print("SKRL VEC ENV WRAPPER COMPLETE")
             if self._task_type == "ppo_tuning":
                 # update the agent configuration with the ppo tuning parameters
                 ppo_tuning_dict = ast.literal_eval(self._ppo_param_string)
@@ -738,6 +762,7 @@ class EurekaTaskManager:
             runner = Runner(env, agent_cfg)
             dump_yaml(os.path.join(self._log_dir, "params", "agent.yaml"), agent_cfg)
             # run training
+            print("DUMP YAML COMPLETE")
             runner.run()
         else:
             raise Exception(f"framework {framework} is not supported yet.")

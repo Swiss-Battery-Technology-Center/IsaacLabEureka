@@ -9,6 +9,12 @@ TASKS_CFG = {
         "success_metric_to_win": 1.0,
         "success_metric_tolerance": 0.01,
     },
+    "Isaac-Cartpole-v0": {
+        "description": "balance a pole on a cart so that the pole stays upright",
+        "success_metric": "self.episode_length_buf[env_ids].float().mean() / self.max_episode_length",
+        "success_metric_to_win": 1.0,
+        "success_metric_tolerance": 0.01,
+    },
     "Isaac-Quadcopter-Direct-v0": {
         "description": (
             "bring the quadcopter to the target position: self._desired_pos_w, while making sure it flies smoothly"
@@ -47,7 +53,8 @@ TASKS_CFG = {
 
 }
 TASK_SUCCESS_REWARD_NAME_DICT = {"SBTC-Lift-Cube-Franka-OSC-v0":"object_goal_tracking",
-                                 "SBTC-Unscrew-Franka-OSC-v0":"screw_engaged"}
+                                 "SBTC-Unscrew-Franka-OSC-v0":"screw_engaged",
+                                 "Isaac-Cartpole-v0": "alive"}
 
 
 

@@ -226,10 +226,12 @@ class Eureka:
         # temporary fix, bc with weight tuning the initial prompt is not used
         context_code_string = self.read_env_source_code(self._task_manager._task)
         ppo_algo_code_string = self.read_ppo_source_code(self._task_manager._rl_library)
+        print("READING SOURCE CODE COMPLETE")
         if self._task_manager._task_type == "reward_weight_tuning":
             self._llm_manager.feed_context_code(context_code_string)
         if self._task_manager._task_type == "ppo_tuning":
             self._llm_manager.feed_context_code(ppo_algo_code_string)
+        print("FEEDING SOURCE CODE COMPLETE")
         if self._task_manager._task_type == "ppo_tuning":
             user_prompt = MANAGER_BASED_PPO_TUNING_TASK_PROMPT.format(
                 task_description=self._task_description,
@@ -255,9 +257,11 @@ class Eureka:
         for iter in range(max_eureka_iterations):
             print(f"\n{'#' * 20} Running Eureka Iteration {iter} {'#' * 20} \n")
             # Get new weights from LLM, from iter==1
+            print('LLM MANAGER PROMPTING START')
             llm_outputs = self._llm_manager.prompt_weights(
                 user_prompt=user_prompt, assistant_prompt=assistant_prompt
             )
+            print('LLM MANAGER PROMPTING COMPLETE')
             gpt_weight_strings = llm_outputs["weight_strings"]
             if iter == 0:
                 # if warmstart, overwrite gpt_weight_strings with the initial tuning string
@@ -271,6 +275,7 @@ class Eureka:
                     f"Run_{idx}/raw_llm_output", gpt_reward_method_string, iter
                 )
             # Train the RL agent
+            print('STARTING TASK MANAGER TRAIN')
             results = self._task_manager.train(gpt_weight_strings)
             # bad fix, gpt_weight_strings is empty at iter==0 so use prev_weights_str instead
             # Evaluate the results
@@ -414,6 +419,9 @@ class Eureka:
             for key in data.keys():
                 if key.endswith(suffix):
                     return key
+            if suffix == "Eureka/success_metric":
+                # If the key is not found, return a default value
+                return "Eureka/success_metric"
             raise KeyError(
                 f"Could not find a key ending with '{suffix}' in TensorBoard logs."
             )
@@ -426,99 +434,54 @@ class Eureka:
         )
 
         # Overwrite Eureka/success_metric with the correct reward term data
+        # skrl tensorboard log doesn't create Eureka/success_metric
+        # for skrl, Eureka/success_metric will not show up in tensorboard
         data[success_metric_key] = data[reward_term_key]
         actual_training_iterations = len(data[success_metric_key])
         adaptive_feedback_subsampling = actual_training_iterations // feedback_subsampling
         # TODO really need to clean this up
         total_feed_back_string = ""
-        if self._task_manager._task_type == "reward_weight_tuning":
-            # for reward weight tuning, only track reward term and success rate history
-            for metric_name, metric_data in data.items():
-                if "Episode_Reward/" in metric_name:
-                    # Remove the first two data points as they are usually outliers
-                    # some metrics like 'quat_reward' have less than 2 entries?
-                    if len(metric_data) > 2:
-                        metric_data = metric_data[2:]
-                    metric_name = metric_name.split("Episode_Reward/", 1)[-1]
-                    metric_min = min(metric_data)
-                    metric_max = max(metric_data)
-                    metric_mean = sum(metric_data) / len(metric_data)
-                    data_string = [
-                        f"{data:.2f}" for data in metric_data[::adaptive_feedback_subsampling]
-                    ]
-                    feedback_string = (
-                        f"{metric_name}: {data_string}, Min: {metric_min:.2f}, Max: {metric_max:.2f}, Mean:"
-                        f" {metric_mean:.2f} \n"
-                    )
-                    if (
-                        "Eureka/success_metric" in data
-                        and metric_name == "Eureka/oracle_total_rewards"
-                    ):
-                        # If success metric is available, we do not provide the oracle feedback
-                        feedback_string = ""
-                    total_feed_back_string += feedback_string
-                elif "Eureka/" in metric_name:
-                    if len(metric_data) > 2:
-                        metric_data = metric_data[2:]
-                    metric_min = min(metric_data)
-                    metric_max = max(metric_data)
-                    metric_mean = sum(metric_data) / len(metric_data)
-                    # Best metric is the one closest to the target
-                    if "success_metric" in metric_name:
-                        metric_name = "task_score"
-                        metric_best = metric_data[
-                            np.abs(
-                                np.array(metric_data) - self._success_metric_to_win
-                            ).argmin()
-                        ]
-                        success_metric_max = metric_best
-                    data_string = [
-                        f"{data:.2f}" for data in metric_data[::adaptive_feedback_subsampling]
-                    ]
-                    feedback_string = (
-                        f"{metric_name}: {data_string}, Min: {metric_min:.2f}, Max: {metric_max:.2f}, Mean:"
-                        f" {metric_mean:.2f} \n"
-                    )
-                    total_feed_back_string += feedback_string
-        if self._task_manager._task_type == "ppo_tuning":
-            # for ppo tuning, just give everything
-            # not truncating metric names, it will be
-            # Episode_Reward/reward_name, Eureka/success_metric, etc.
-            for metric_name, metric_data in data.items():
-                if len(metric_data) > 2:
-                    metric_data = metric_data[2:]
-                metric_min = min(metric_data)
-                metric_max = max(metric_data)
-                metric_mean = sum(metric_data) / len(metric_data)
-                # Best metric is the one closest to the target
-                if "Eureka/success_metric" in metric_name:
-                    metric_name = "task_score"
-                    metric_best = metric_data[
-                        np.abs(
-                            np.array(metric_data) - self._success_metric_to_win
-                        ).argmin()
-                    ]
-                    success_metric_max = metric_best
-                data_string = [
-                    f"{data:.2f}" for data in metric_data[::adaptive_feedback_subsampling]
+        # just give everything, hope that llm can figure it out
+        for metric_name, metric_data in data.items():
+            if len(metric_data) > 2:
+                metric_data = metric_data[2:]
+            metric_min = min(metric_data)
+            metric_max = max(metric_data)
+            metric_mean = sum(metric_data) / len(metric_data)
+            # Best metric is the one closest to the target
+            if "Eureka/success_metric" in metric_name:
+                metric_name = "task_score"
+                metric_best = metric_data[
+                    np.abs(
+                        np.array(metric_data) - self._success_metric_to_win
+                    ).argmin()
                 ]
-                feedback_string = (
-                    f"{metric_name}: {data_string}, Min: {metric_min:.2f}, Max: {metric_max:.2f}, Mean:"
-                    f" {metric_mean:.2f} \n"
-                )
-                if (
-                    "Eureka/success_metric" in data
-                    and metric_name == "Eureka/oracle_total_rewards"
-                ):
-                    # If success metric is available, we do not provide the oracle feedback
-                    feedback_string = ""
-                total_feed_back_string += feedback_string
+                success_metric_max = metric_best
+            data_string = [
+                f"{data:.2f}" for data in metric_data[::adaptive_feedback_subsampling]
+            ]
+            feedback_string = (
+                f"{metric_name}: {data_string}, Min: {metric_min:.2f}, Max: {metric_max:.2f}, Mean:"
+                f" {metric_mean:.2f} \n"
+            )
+            if (
+                "Eureka/success_metric" in data
+                and metric_name == "Eureka/oracle_total_rewards"
+            ):
+                # If success metric is available, we do not provide the oracle feedback
+                feedback_string = ""
+            total_feed_back_string += feedback_string
 
         total_feed_back_string += (
             f"\nThe desired task_score to win is: {self._success_metric_to_win:.2f}\n"
         )
-        total_feed_back_string += f"Each metric was sampled at every {adaptive_feedback_subsampling} learning iterations.\n"
-        total_feed_back_string += f"Max learning iteration was set to {self._task_manager._max_training_iterations}, and the actual training had {actual_training_iterations} learning iterations.\n"
+        total_feed_back_string += f"The agent is trained using {self._task_manager._rl_library} library.\n"
+        if self._task_manager._rl_library == "skrl":
+            total_feed_back_string += f"Each metric was sampled at every {adaptive_feedback_subsampling} timesteps.\n"
+            total_feed_back_string += f"Max training timestep was set to {self._task_manager._max_training_iterations * self._task_manager._skrl_rollout}, and the actual training had {actual_training_iterations} timesteps.\n"
+        else:
+            total_feed_back_string += f"Each metric was sampled at every {adaptive_feedback_subsampling} learning iterations.\n"
+            total_feed_back_string += f"Max learning iteration was set to {self._task_manager._max_training_iterations}, and the actual training had {actual_training_iterations} learning iterations.\n"
         total_feed_back_string += f"Note that a curriculum may have been setup to change reward weights to a certain value after a certain number of training iterations.\n"
         total_feed_back_string += f"If you see a reward term dramatically changing its magnitude order, a curriculum might have been at play.\n"
         return total_feed_back_string, success_metric_max, 0
