@@ -34,10 +34,11 @@ def main(args_cli):
         temperature=args_cli.temperature,
         gpt_model=args_cli.gpt_model,
         env_type=args_cli.env_type,
-        task_type=args_cli.task_type,
+        eureka_task=args_cli.eureka_task,
         parameters_to_tune=args_cli.parameters_to_tune,
         warmstart = args_cli.warmstart,
         num_envs = args_cli.num_envs,
+        resume = args_cli.resume,
     )
 
     eureka.run(max_eureka_iterations=args_cli.max_eureka_iterations)
@@ -80,7 +81,7 @@ if __name__ == "__main__":
         help="The RL training library to use.",
     )
     parser.add_argument("--env_type", type=str, default="", help="Type of IsaacLab env")
-    parser.add_argument("--task_type", type=str, default="reward_weight_tuning", help="Eureka task type.")
+    parser.add_argument("--eureka_task", type=str, default="reward_weight_tuning", help="Eureka task type.")
     parser.add_argument("--parameters_to_tune", nargs="+", default=[], help="List of parameters to tune (for PPO tuning).")
     args_cli = parser.parse_args()
     

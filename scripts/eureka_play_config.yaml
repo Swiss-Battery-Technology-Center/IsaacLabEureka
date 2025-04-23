@@ -1,0 +1,5 @@
+  task: "SBTC-Unscrew-Franka-OSC-Play-v0" # "SBTC-Lift-Cube-Franka-OSC-v0" "SBTC-Unscrew-Franka-OSC-v0"
+  num_envs: 16
+  rl_library: "rsl_rl"
+  checkpoint: "/workspace/isaaclab/_isaaclab_eureka/logs/rl_runs/rsl_rl/sbtc_franka_unscrew_osc/basline_sbtc/model_1050.pt"
+  livestream: 2

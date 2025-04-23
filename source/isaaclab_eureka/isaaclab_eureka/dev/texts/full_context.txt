@@ -1,0 +1,570 @@
+##### === SBTC ENV CONFIG === #####
+
+#################################################################
+# Copyright (c) 2024 SBTC Switzerland Innovation Park Biel Bienne
+# Author: Özhan Özen
+# Email: oezhan.oezen@sipbb.ch, sbtc@sipbb.ch
+# Created: 2024-06-04
+#################################################################
+
+from __future__ import annotations
+
+from dataclasses import MISSING
+
+import isaaclab.sim as sim_utils
+import isaaclab_tasks.sbtc.manager_based.mdp as mdp
+import torch
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
+from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.managers import ActionTermCfg as ActionTerm
+from isaaclab.managers import CurriculumTermCfg as CurrTerm
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sensors import ContactSensorCfg
+from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
+from isaaclab.sim.spawners.materials.physics_materials_cfg import RigidBodyMaterialCfg
+from isaaclab.utils import configclass
+from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
+
+##
+# Scene definition
+##
+
+
+@configclass
+class SBTCUnscrewSceneCfg(InteractiveSceneCfg):
+    """Configuration for the scene with a robotic arm."""
+
+    # world
+    ground = AssetBaseCfg(
+        prim_path="/World/ground",
+        spawn=sim_utils.GroundPlaneCfg(),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, 0.0)),
+    )
+
+    # robot base
+    robot_base: AssetBaseCfg = MISSING  # type: ignore
+
+    # robots
+    robot: ArticulationCfg = MISSING  # type: ignore
+
+    # target object: will be populated by agent env cfg
+    object: RigidObjectCfg = MISSING  # type: ignore
+
+    # end-effector sensor: will be populated by agent env cfg
+    ee_frame: FrameTransformerCfg = MISSING  # type: ignore
+
+    # object sensor: will be populated by agent env cfg
+    object_frame: FrameTransformerCfg = MISSING  # type: ignore
+
+    # contact sensor at the end-effector: will be populated by agent env cfg
+    # This goes the observations
+    contact_sensor_ee: ContactSensorCfg = MISSING  # type: ignore
+
+    # lights
+    light = AssetBaseCfg(
+        prim_path="/World/light",
+        spawn=sim_utils.DomeLightCfg(color=(0.75, 0.75, 0.75), intensity=2500.0),
+    )
+
+
+##
+# MDP settings
+##
+
+
+@configclass
+class ActionsCfg:
+    """Action specifications for the MDP."""
+
+    arm_action: ActionTerm = MISSING  # type: ignore
+
+
+@configclass
+class ObservationsCfg:
+    """Observation specifications for the MDP."""
+
+    @configclass
+    class PolicyCfg(ObsGroup):
+        """Observations for policy group."""
+
+        # 3
+        ee_position = ObsTerm(
+            func=mdp.ee_position_in_robot_root_frame,
+            noise=Unoise(n_min=-0.0001, n_max=0.0001),
+        )
+        # 3
+        ee_rotation = ObsTerm(
+            func=mdp.ee_delta_rotation_in_robot_root_frame,
+            noise=Unoise(n_min=-0.0001, n_max=0.0001),
+        )
+        # 6
+        ee_velocity = ObsTerm(
+            func=mdp.ee_velocity_in_robot_root_frame,
+            params={"asset_cfg": SceneEntityCfg("robot", body_names=MISSING)},  # type: ignore
+            noise=Unoise(n_min=-0.001, n_max=0.001),
+        )
+        # 6
+        raw_actions = ObsTerm(func=mdp.last_action, params={"action_name": "arm_action"})
+        # 6
+        processed_actions = ObsTerm(func=mdp.last_processed_action, params={"action_name": "arm_action"})
+        # 3
+        object_position = ObsTerm(
+            func=mdp.object_position_in_robot_root_frame,
+            noise=Unoise(n_min=-0.002, n_max=0.002),
+        )
+        # 1
+        object_yaw = ObsTerm(
+            func=mdp.object_delta_yaw_in_robot_root_frame,
+            noise=Unoise(n_min=-0.05, n_max=0.05),
+        )
+        # 3
+        interaction_forces_ee = ObsTerm(
+            func=mdp.interaction_forces_prim_net,
+            params={
+                "sensor_cfg": SceneEntityCfg("contact_sensor_ee"),
+            },
+            noise=Unoise(n_min=-0.1, n_max=0.1),
+            clip=(-1000.0, 1000.0),
+        )
+
+        def __post_init__(self):
+            self.enable_corruption = True
+            self.concatenate_terms = True
+
+    @configclass
+    class CriticCfg(ObsGroup):
+        """Observations for critic group."""
+
+        ee_position = ObsTerm(
+            func=mdp.ee_position_in_robot_root_frame,
+        )
+        ee_rotation = ObsTerm(
+            func=mdp.ee_delta_rotation_in_robot_root_frame,
+        )
+        ee_velocity = ObsTerm(
+            func=mdp.ee_velocity_in_robot_root_frame,
+            params={"asset_cfg": SceneEntityCfg("robot", body_names=MISSING)},  # type: ignore
+        )
+        raw_actions = ObsTerm(func=mdp.last_action, params={"action_name": "arm_action"})
+        processed_actions = ObsTerm(func=mdp.last_processed_action, params={"action_name": "arm_action"})
+        object_position = ObsTerm(
+            func=mdp.object_position_in_robot_root_frame,
+        )
+        object_yaw = ObsTerm(
+            func=mdp.object_delta_yaw_in_robot_root_frame,
+        )
+        interaction_forces_ee_filtered = ObsTerm(
+            func=mdp.interaction_forces_prim_filteredprims,
+            params={
+                "sensor_cfg": SceneEntityCfg("contact_sensor_ee"),
+            },
+        )
+
+        def __post_init__(self):
+            self.enable_corruption = True
+            self.concatenate_terms = True
+
+    # observation groups
+    policy: PolicyCfg = PolicyCfg()
+    critic: CriticCfg = CriticCfg()
+
+
+@configclass
+class EventCfg:
+    """Configuration for randomization."""
+
+    reset_object_pose = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "pose_range": {
+                "x": (-0.1, 0.1),
+                "y": (-0.1, 0.1),
+                "z": (-0.1, 0.1),
+                "yaw": (-torch.pi / 6, torch.pi / 6),
+            },
+            "velocity_range": {},
+            "asset_cfg": SceneEntityCfg("object", body_names="object"),
+        },
+    )
+
+    reset_robot_joints = EventTerm(
+        func=mdp.randomize_ee_pose_wrt_object,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=MISSING, body_names=MISSING),  # type: ignore
+            "object_cfg": SceneEntityCfg("object", body_names="object"),
+            "ref_ee_object_pos_offset": (0.0, 0.0, 0.05),
+            "unoise_ee_pos": (0.04, 0.04, 0.04),
+            "unoise_ee_axisangle": (0.2, 0.2, 0.2),
+        },
+    )
+
+    randomize_pd_gains = EventTerm(
+        func=mdp.randomize_osc_pd_gains,
+        mode="reset",
+        params={
+            "term_name": "arm_action",
+            "p_range": (50.0, 150.0),
+            "d_range": (0.5, 1.5),
+        },
+    )
+
+
+@configclass
+class RewardsCfg:
+    """Reward terms for the MDP."""
+
+    ee_verticality = RewTerm(
+        func=mdp.reward_axis_similarity_vector_ee,
+        params={"target_quat": (0.0, 1.0, 0.0, 0.0)},
+        weight=1.0, #4.0
+    )
+    yaw_alignment = RewTerm(
+        func=mdp.reward_yaw_similarity_object_ee,
+        params={"angle_repeats": 6},
+        weight=3.0, #1.0
+    )
+    pos_similarity_coarse = RewTerm(
+        func=mdp.reward_position_similarity_squash_object_ee,
+        params={
+            "sigma": 5.0,
+            "object_offset_w": (0.0, 0.0, 0.006),
+        },
+        weight=0.75, # 0.25
+    )
+    pos_similarity_medium = RewTerm(
+        func=mdp.reward_position_similarity_squash_object_ee,
+        params={
+            "sigma": 50.0,
+            "object_offset_w": (0.0, 0.0, 0.006),
+        },
+        weight=1,# 0.5
+    )
+    pos_similarity_fine = RewTerm(
+        func=mdp.reward_position_similarity_squash_object_ee,
+        params={
+            "sigma": 100.0,
+            "object_offset_w": (0.0, 0.0, 0.006),
+        },
+        weight=1.5, #0.75
+    )
+    screw_engaged = RewTerm(
+        func=mdp.reward_position_similarity_step_tanh_object_ee,
+        params={
+            "offset": 0.002,
+            "sigma": 0.0007,
+            "object_offset_w": (0.0, 0.0, 0.006),
+        },
+        weight=1.0, # don't change this, this is task success metric and there's curriculum
+    )
+
+    screw_contact = RewTerm(
+        func=mdp.is_contact_prim_filteredprim,
+        weight=0.5, # 0.1
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_sensor_ee"),
+            "filtered_body_id": 0,
+            "threshold": 2.5,
+            "axis_idx": 2,
+        },
+    )
+    table_contact = RewTerm(
+        func=mdp.is_contact_prim_filteredprim,
+        weight=-1.0, # -10.0
+        params={"sensor_cfg": SceneEntityCfg("contact_sensor_ee"), "filtered_body_id": 1, "threshold": 1.0},
+    )
+
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.05) # -0.005
+    joint_vel = RewTerm(
+        func=mdp.joint_vel_l2,
+        weight=-0.001, # -0.005
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=MISSING)},  # type: ignore
+    )
+
+
+@configclass
+class TerminationsCfg:
+    """Termination terms for the MDP."""
+
+    time_out = DoneTerm(func=mdp.time_out, time_out=True)
+
+
+@configclass
+class CurriculumCfg:
+    """Curriculum terms for the MDP."""
+
+    # num_steps = num_steps_per_env (24) * training_step_to_change (e.g., 200)
+
+    reset_robot_joints = CurrTerm(
+        func=mdp.modify_ee_pose_reset_progressively,
+        params={
+            "term_name": "reset_robot_joints",
+            "ref_ee_object_pos_offset_start": (0.0, 0.0, 0.05),
+            "ref_ee_object_pos_offset_end": (0.0, 0.0, 0.21),
+            "unoise_ee_pos_start": (0.04, 0.04, 0.04),
+            "unoise_ee_pos_end": (0.2, 0.2, 0.2),
+            "unoise_ee_axisangle_start": (0.2, 0.2, 0.2),
+            "unoise_ee_axisangle_end": (0.2, 0.2, 0.2),
+            "num_steps_start": 500 * 24,  # 1100
+            "num_steps_end": 600 * 24,  # 1300
+        },
+    )
+
+    object_offset = CurrTerm(
+        func=mdp.modify_reward_object_offset_progressively,
+        params={
+            "term_name_list": (
+                "pos_similarity_coarse",
+                "pos_similarity_medium",
+                "pos_similarity_fine",
+                "screw_engaged",
+            ),
+            "object_offset_w_start": (0.0, 0.0, 0.006),
+            "object_offset_w_end": (0.0, 0.0, 0.0),
+            "num_steps_start": 700 * 24,  # 700
+            "num_steps_end": 800 * 24,  # 800
+        },
+    )
+
+
+##
+# Environment configuration
+##
+
+
+@configclass
+class SBTCUnscrewEnvCfg(ManagerBasedRLEnvCfg):
+    """Configuration for the reach end-effector pose tracking environment."""
+
+    # Scene settings
+    scene: SBTCUnscrewSceneCfg = SBTCUnscrewSceneCfg(num_envs=4096, env_spacing=2.5, replicate_physics=True)
+    # Basic settings
+    observations: ObservationsCfg = ObservationsCfg()
+    actions: ActionsCfg = ActionsCfg()
+    # MDP settings
+    rewards: RewardsCfg = RewardsCfg()
+    terminations: TerminationsCfg = TerminationsCfg()
+    events: EventCfg = EventCfg()
+    curriculum: CurriculumCfg = CurriculumCfg()
+
+    def __post_init__(self):
+        """Post initialization."""
+        # general settings
+        self.decimation = 4
+        self.episode_length_s = 5.0
+        # simulation settings
+        self.sim.dt = 0.01  # 100Hz
+        self.sim.render_interval = self.decimation
+
+        # Viewer settings
+        self.viewer.eye = (0.125, 0.0, 0.05)
+        self.viewer.lookat = (0.0, 0.0, 0.0)
+        self.viewer.origin_type = "asset_root"
+        self.viewer.asset_name = "object"
+
+        # Factory settings ##################
+
+        self.sim.physics_material = RigidBodyMaterialCfg(
+            static_friction=1.0,
+            dynamic_friction=1.0,
+        )
+
+        self.sim.physx.max_position_iteration_count = 192  # Important to avoid interpenetration.
+        self.sim.physx.max_velocity_iteration_count = 1
+        self.sim.physx.bounce_threshold_velocity = 0.2
+        self.sim.physx.friction_offset_threshold = 0.01
+        self.sim.physx.friction_correlation_distance = 0.00625
+
+        self.sim.physx.gpu_max_rigid_contact_count = 2**23
+        self.sim.physx.gpu_max_rigid_patch_count = 2**23
+        self.sim.physx.gpu_max_num_partitions = 1  # Important for stable simulation.
+        #######################################
+
+        # Custom settings
+        self.sim.physx.gpu_collision_stack_size = 2**31
+        # self.sim.physx.enable_ccd = True  # TODO Check if this is needed
+        # self.sim.physx.gpu_found_lost_pairs_capacity *= 1
+        # self.sim.physx.gpu_found_lost_aggregate_pairs_capacity *= 1
+        # self.sim.physx.gpu_total_aggregate_pairs_capacity *= 1
+        # self.sim.physx.gpu_heap_capacity *= 1
+        # self.sim.physx.gpu_temp_buffer_capacity *= 1
+        # self.sim.physx.gpu_max_soft_body_contacts *= 1
+        # self.sim.physx.gpu_max_particle_contacts *= 1
+
+
+
+##### === REWARDS FUNCTIONS === #####
+
+=== action_rate_l2 ===
+# === rewards.action_rate_l2 ===
+def action_rate_l2(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Penalize the rate of change of the actions using L2 squared kernel."""
+    return torch.sum(torch.square(env.action_manager.action - env.action_manager.prev_action), dim=1)
+
+
+=== is_contact_prim_filteredprim ===
+# Failed to statically extract is_contact_prim_filteredprim
+
+
+=== joint_vel_l2 ===
+# === rewards.joint_vel_l2 ===
+def joint_vel_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Penalize joint velocities on the articulation using L2 squared kernel.
+
+    NOTE: Only the joints configured in :attr:`asset_cfg.joint_ids` will have their joint velocities contribute to the term.
+    """
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    return torch.sum(torch.square(asset.data.joint_vel[:, asset_cfg.joint_ids]), dim=1)
+
+
+=== reward_axis_similarity_vector_ee ===
+# Failed to statically extract reward_axis_similarity_vector_ee
+
+
+=== reward_position_similarity_squash_object_ee ===
+# Failed to statically extract reward_position_similarity_squash_object_ee
+
+
+=== reward_position_similarity_step_tanh_object_ee ===
+# Failed to statically extract reward_position_similarity_step_tanh_object_ee
+
+
+=== reward_yaw_similarity_object_ee ===
+# Failed to statically extract reward_yaw_similarity_object_ee
+
+
+
+##### === EVENTS FUNCTIONS === #####
+
+=== randomize_ee_pose_wrt_object ===
+# Failed to statically extract randomize_ee_pose_wrt_object
+
+
+=== randomize_osc_pd_gains ===
+# Failed to statically extract randomize_osc_pd_gains
+
+
+=== reset_root_state_uniform ===
+# === events.reset_root_state_uniform ===
+def reset_root_state_uniform(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    pose_range: dict[str, tuple[float, float]],
+    velocity_range: dict[str, tuple[float, float]],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+):
+    """Reset the asset root state to a random position and velocity uniformly within the given ranges.
+
+    This function randomizes the root position and velocity of the asset.
+
+    * It samples the root position from the given ranges and adds them to the default root position, before setting
+      them into the physics simulation.
+    * It samples the root orientation from the given ranges and sets them into the physics simulation.
+    * It samples the root velocity from the given ranges and sets them into the physics simulation.
+
+    The function takes a dictionary of pose and velocity ranges for each axis and rotation. The keys of the
+    dictionary are ``x``, ``y``, ``z``, ``roll``, ``pitch``, and ``yaw``. The values are tuples of the form
+    ``(min, max)``. If the dictionary does not contain a key, the position or velocity is set to zero for that axis.
+    """
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject | Articulation = env.scene[asset_cfg.name]
+    # get default root state
+    root_states = asset.data.default_root_state[env_ids].clone()
+
+    # poses
+    range_list = [pose_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
+    ranges = torch.tensor(range_list, device=asset.device)
+    rand_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 6), device=asset.device)
+
+    positions = root_states[:, 0:3] + env.scene.env_origins[env_ids] + rand_samples[:, 0:3]
+    orientations_delta = math_utils.quat_from_euler_xyz(rand_samples[:, 3], rand_samples[:, 4], rand_samples[:, 5])
+    orientations = math_utils.quat_mul(root_states[:, 3:7], orientations_delta)
+    # velocities
+    range_list = [velocity_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
+    ranges = torch.tensor(range_list, device=asset.device)
+    rand_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 6), device=asset.device)
+
+    velocities = root_states[:, 7:13] + rand_samples
+
+    # set into the physics simulation
+    asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
+    asset.write_root_velocity_to_sim(velocities, env_ids=env_ids)
+
+
+
+##### === CURRICULUM FUNCTIONS === #####
+
+=== modify_ee_pose_reset_progressively ===
+# Failed to statically extract modify_ee_pose_reset_progressively
+
+
+=== modify_reward_object_offset_progressively ===
+# Failed to statically extract modify_reward_object_offset_progressively
+
+
+
+##### === TERMINATIONS FUNCTIONS === #####
+
+=== time_out ===
+# === terminations.time_out ===
+def time_out(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Terminate the episode when the episode length exceeds the maximum episode length."""
+    return env.episode_length_buf >= env.max_episode_length
+
+
+
+##### === OBSERVATIONS FUNCTIONS === #####
+
+=== ee_delta_rotation_in_robot_root_frame ===
+# Failed to statically extract ee_delta_rotation_in_robot_root_frame
+
+
+=== ee_position_in_robot_root_frame ===
+# Failed to statically extract ee_position_in_robot_root_frame
+
+
+=== ee_velocity_in_robot_root_frame ===
+# Failed to statically extract ee_velocity_in_robot_root_frame
+
+
+=== interaction_forces_prim_filteredprims ===
+# Failed to statically extract interaction_forces_prim_filteredprims
+
+
+=== interaction_forces_prim_net ===
+# Failed to statically extract interaction_forces_prim_net
+
+
+=== last_action ===
+# === observations.last_action ===
+def last_action(env: ManagerBasedEnv, action_name: str | None = None) -> torch.Tensor:
+    """The last input action to the environment.
+
+    The name of the action term for which the action is required. If None, the
+    entire action tensor is returned.
+    """
+    if action_name is None:
+        return env.action_manager.action
+    else:
+        return env.action_manager.get_term(action_name).raw_actions
+
+
+=== last_processed_action ===
+# Failed to statically extract last_processed_action
+
+
+=== object_delta_yaw_in_robot_root_frame ===
+# Failed to statically extract object_delta_yaw_in_robot_root_frame
+
+
+=== object_position_in_robot_root_frame ===
+# Failed to statically extract object_position_in_robot_root_frame
+

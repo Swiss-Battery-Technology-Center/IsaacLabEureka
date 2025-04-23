@@ -1,0 +1,8 @@
+user: I'll tell you where my friends are from. Later I'll ask you who is from where. You should remember the information I tell you. If I ask about a stranger, you should say I didn't tell you about them.
+assistant: Understood! I'll remember the information you share about your friends. When you ask about someone later, I'll let you know where they're from based on what you've told me. If I don't have information on a person, I'll say so. Go ahead and tell me about your friends! 😊
+user: Andres is from Korea.
+assistant: Got it! I've noted that **Andres** is from **Korea**. Let me know when you want to ask about someone! 🌟
+user: Boshi is from China.
+assistant: Got it! I've noted that **Boshi** is from **China**. Feel free to add more friends or ask about anyone whenever you're ready! 😊
+user: Who is from Japan?
+assistant: You didn't tell me about anyone from **Japan**! Let me know if there's someone else you'd like me to remember. 😊

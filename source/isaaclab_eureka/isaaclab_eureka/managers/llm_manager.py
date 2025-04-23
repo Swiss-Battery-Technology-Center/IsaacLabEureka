@@ -5,7 +5,9 @@
 import os
 import re
 
+
 import openai
+
 
 class LLMManager:
     """Manager to interface with the LLM API.
@@ -21,11 +23,11 @@ class LLMManager:
     def __init__(
         self,
         gpt_model: str,
-        num_suggestions: int,
         temperature: float,
-        system_prompt: str,
+        num_suggestions: int = 1,
+        system_prompt: str = "",
         env_type: str = "",
-        task_type: str = "",
+        eureka_task: str = "",
         parameters_to_tune: list[str] = [],
     ):
         """Initialize the LLMManager
@@ -40,8 +42,8 @@ class LLMManager:
         self._gpt_model = gpt_model
         self._num_suggestions = num_suggestions
         self._temperature = temperature
-        self._prompts = [{"role": "system", "content": system_prompt}]
-
+        # self._prompts = [{"role": "system", "content": system_prompt}]
+        self._prompts = []
         if "AZURE_OPENAI_API_KEY" in os.environ:
             self._client = openai.AzureOpenAI(api_version="2024-02-01")
         elif "OPENROUTER_API_KEY" in os.environ:
@@ -59,9 +61,51 @@ class LLMManager:
         self._input_token_price = 0.27
         self._output_token_price = 1.10
         
+    # appends a string to an already existing system prompt
     def append_to_system_prompt(self, additioal_prompt: str):
         assert self._prompts[0]["role"] == "system" 
         self._prompts[0]["content"] += additioal_prompt
+
+    # granular control over self._prompts
+    # in the main codeblock, make sure
+    # appends a new system prompt to an empty list
+    def append_system_prompt(self, prompt: str):
+        assert not self._prompts #  assert that self._prompts is an empty list
+        self._prompts.append({"role": "system", "content": prompt})
+
+    # appends a new user prompt 
+    def append_user_prompt(self, prompt: str):
+        self._prompts.append({"role": "user", "content": prompt})
+
+    # appends a new assistant prompt
+    def append_assistant_prompt(self, prompt: str):
+        self._prompts.append({"role": "assistant", "content": prompt})
+
+
+    def clear_prompts(self):
+        """Clear the prompts list"""
+        self._prompts = []
+
+    # make sure you set the prompts correctly before calling this function
+    def call_llm(self) -> dict:
+        # add exception handling later, for the case when llm api fails
+        try:
+            responses = self._client.chat.completions.create(
+                model=self._gpt_model,
+                messages=self._prompts,
+                temperature=self._temperature,
+                n=self._num_suggestions,
+            )
+        except Exception as e:
+            raise RuntimeError("An error occurred while prompting the LLM") from e
+        # llm returns a single response that contains multiple weight strings
+        raw_output = responses.choices[0].message.content
+        weights_strings = self.extract_multiple_weights_from_response(raw_output) 
+        self._total_tokens += responses.usage.total_tokens
+        self._total_query_tokens += responses.usage.prompt_tokens
+        self._total_response_tokens += responses.usage.completion_tokens
+        return {"weight_strings": weights_strings, "raw_output": raw_output}
+
     def extract_code_from_response(self, response: str) -> str:
         """Extract the code component from the LLM response
 
@@ -119,47 +163,7 @@ class LLMManager:
             self.extract_code_from_response(raw_output) for raw_output in raw_outputs
         ]
         return {"reward_strings": reward_strings, "raw_outputs": raw_outputs}
-    
-    def feed_context_code(self, context_code_string: str, chunk_size: int = 50000):
-        """Feed long source code context into the LLM as user messages (without requiring a response).
 
-        Args:
-            context_code_string: A large string containing the full environment source code.
-            chunk_size: Maximum number of characters per chunk sent to the LLM.
-        """
-        import textwrap
-
-        # Split into chunks
-        chunks = textwrap.wrap(context_code_string, width=chunk_size, break_long_words=False, break_on_hyphens=False)
-
-        for i, chunk in enumerate(chunks):
-            intro = (
-                f"[Chunk {i+1}/{len(chunks)}] Below is a portion of the environment source code "
-                "to help you understand how the environment is implemented. You don't have to respond. "
-                "Just read and remember it for future queries.\n\n"
-            )
-            full_prompt = intro + chunk
-
-            # Feed to LLM as user prompt without expecting a response
-
-            try:
-                # Send dummy query to register the prompt internally (ignore response)
-                print('CREATING CHAT COMPLETION TO FEED CONTEXT')
-
-                responses = self._client.chat.completions.create(
-                    model=self._gpt_model,
-                    messages=[{"role": "user", "content": full_prompt}],
-                    temperature=self._temperature,
-                    n=1,
-                )
-                print('CHAT COMPLETION SUCCESSFUL')
-                self._total_tokens += responses.usage.total_tokens
-                self._total_query_tokens += responses.usage.prompt_tokens
-                self._total_response_tokens += responses.usage.completion_tokens
-            except Exception as e:
-                raise RuntimeError(f"Failed to feed context chunk {i+1}/{len(chunks)} to the LLM.") from e
-
-        print(f"[INFO] Successfully fed {len(chunks)} context chunks to LLM.")
     def extract_multiple_weights_from_response(self, response: str) -> list[str]:
         """Extracts the weights string from the LLM response.
 
@@ -189,15 +193,12 @@ class LLMManager:
 
         try:
             print('CREATING CHAT COMPLETION TO PROMPT WEIGHTS')
-            signal.signal(signal.SIGALRM, handler)
-            signal.alarm(60)  # Timeout after 60 seconds
             responses = self._client.chat.completions.create(
                 model=self._gpt_model,
                 messages=self._prompts,
                 temperature=self._temperature,
                 n=self._num_suggestions,
             )
-            signal.alarm(0)  # Cancel alarm if successful
             print('CHAT COMPLETION SUCCESSFUL')
         except Exception as e:
             raise RuntimeError("An error occurred while prompting the LLM") from e
@@ -210,10 +211,5 @@ class LLMManager:
         self._total_response_tokens += responses.usage.completion_tokens
         return {"weight_strings": weights_strings, "raw_outputs": raw_outputs}
     
-import signal
 
-class TimeoutException(Exception): pass
-
-def handler(signum, frame):
-    raise TimeoutException("LLM call took too long!")
 

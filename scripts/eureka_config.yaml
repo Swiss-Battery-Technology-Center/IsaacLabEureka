@@ -4,24 +4,28 @@ task: "SBTC-Unscrew-Franka-OSC-v0" # "SBTC-Lift-Cube-Franka-OSC-v0" "SBTC-Unscre
 
 # eureka parallel runs, set 5 for evolutionary search
 # supported only for manager-based tuning
-num_parallel_runs: 1
+num_parallel_runs: 3
 
+resume:
+  enabled: False # True if you want to resume from a previous run, False if fresh start
+  prev_iterations_path: "" # path to desired eureka_iterations.txt file(including filename!), only for resume = True
 
 max_eureka_iterations: 5 # one iteration consists of full RL training + getting a new reward/ppo tuning from llm
 
 
 # LLM-related arguments
-gpt_model: "deepseek/deepseek-chat-v3-0324:free" # "deepseek/deepseek-chat-v3-0324:free" or "google/gemma-3-12b-it:free", any free model from https://openrouter.ai/models?max_price=0
+gpt_model: "deepseek/deepseek-r1:free" # "deepseek/deepseek-chat-v3-0324:free" or "google/gemma-3-12b-it:free", any free model from https://openrouter.ai/models?max_price=0
 temperature: 1
 
 # IsaacLab related arguments
-num_envs: 256 # choose appropriate value for task, 1024 for unscrew/lift
+num_envs: 1024 # choose appropriate value for task, 1024 for unscrew/lift
 
-max_training_iterations: 10 # RL learning iterations, 800 for lift, 1500 for unscrew
+max_training_iterations: 1300 # RL learning iterations, 800 for lift, 1500 for unscrew
 feedback_subsampling: 10 # adaptive to max learning iterations, 10 will sample 10 times during a full RL training, 20 will sample 20 times
 
 env_type: "manager_based" # "manager_based" or "direct"
-task_type: "ppo_tuning" # "ppo_tuning" or "reward_weight_tuning"
+
+eureka_task: "reward_weight_tuning" # "ppo_tuning" or "reward_weight_tuning"
 warmstart: False # True if using oracle tuning found by experts at SBTC as initial weights
 
 # "rsl_rl" , "rl_games",  "skrl" supported for "reward_weight_tuning", 
@@ -34,11 +38,11 @@ rl_library: "skrl"
 
 # for skrl
 
-parameters_to_tune: 
-  - "agent.learning_rate"
-  - "agent.entropy_loss_scale"
-  - "agent.kl_threshold"
-  - "agent.lambda"
+# parameters_to_tune: 
+#   - "agent.learning_rate"
+#   - "agent.entropy_loss_scale"
+#   - "agent.kl_threshold"
+#   - "agent.lambda"
 #   - "agent.learning_rate_scheduler_kwargs.kl_threshold"
 #   - "agent.kl_threshold"
 #   - "models.policy.clip_actions"

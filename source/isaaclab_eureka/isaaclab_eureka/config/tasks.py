@@ -39,13 +39,13 @@ TASKS_CFG = {
         "success_metric_tolerance": 0.1,
     },
     "SBTC-Lift-Cube-Franka-OSC-v0":{
-        "description": "Use Franka arm to lift an object and bring it to a target position in air. Task is considered to be successful if the distance between the object and the target position is less than threshold.",
+        "description": "Use Franka arm to lift an object and bring it to a target position in air.",
         "success_metric": "0",
-        "success_metric_to_win": 10, # because curriculum will increase object_goal_tracking by 10 times
-        "success_metric_tolerance": 0.01,
+        "success_metric_to_win": 1, # now success metric is independent of reward weights!
+        "success_metric_tolerance": 0.001,
     },
         "SBTC-Unscrew-Franka-OSC-v0":{
-        "description": "Use Franka arm to approach a screw, engage and unscrew it. Task is considered to be successful if robot arm end effector engages/clicks with the screw.",
+        "description": "Use Franka arm to approach a screw, engage and unscrew it.",
         "success_metric": "0",
         "success_metric_to_win":1,
         "success_metric_tolerance": 0.001,

@@ -12,7 +12,20 @@ from rl_games.common.player import BasePlayer
 
 from isaaclab_eureka.utils import get_freest_gpu
 
+import yaml
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "eureka_play_config.yaml")  # Ensure path is correct
 
+def load_yaml_config(config_path):
+    """Load configuration from YAML file."""
+    with open(config_path, "r") as file:
+        return yaml.safe_load(file)
+
+def merge_args_with_yaml(args, yaml_config):
+    """Merge command-line arguments with YAML config (YAML overrides CLI)."""
+    merged_config = vars(args)  # Convert argparse Namespace to dictionary
+    for key, value in yaml_config.items():
+        merged_config[key] = value  # YAML overrides CLI arguments
+    return argparse.Namespace(**merged_config)  # Convert back to Namespace
 
 def main(args_cli):
     """Create the environment for the task."""
@@ -291,6 +304,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
     args_cli = parser.parse_args()
-
+    yaml_config = load_yaml_config(CONFIG_PATH)
+    args_cli = merge_args_with_yaml(args_cli, yaml_config)
     # Run the main function
     main(args_cli)

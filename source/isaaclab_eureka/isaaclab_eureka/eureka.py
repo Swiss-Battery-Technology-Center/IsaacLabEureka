@@ -8,7 +8,7 @@ import os
 import textwrap
 from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 from typing import Literal
-
+import traceback
 from isaaclab_eureka import EUREKA_ROOT_DIR
 from isaaclab_eureka.config import (
     DIRECT_WORKFLOW_INITIAL_PROMPT,
@@ -24,15 +24,17 @@ from isaaclab_eureka.config import (
     MANAGER_BASED_PPO_TUNING_INITIAL_PROMPT,
     MULTIPLE_SUGGESTIONS_EXAMPLE,
     MULTIPLE_SUGGESTIONS_INSTRUCTION,
-    WEIGHT_TUNING_TASK_FAILURE_FEEDBACK_PROMPT,
+    WEIGHT_TUNING_TASK_CRASH_FEEDBACK_PROMPT,
+    WEIGHT_TUNING_TASK_FORMAT_ERROR_FEEDBACK_PROMPT,
     WEIGHT_TUNING_TASK_SUCCESS_POST_FEEDBACK_PROMPT,
     WEIGHT_TUNING_TASK_SUCCESS_PRE_FEEDBACK_PROMPT,
-    PPO_TUNING_TASK_FAILURE_FEEDBACK_PROMPT,
+    PPO_TUNING_TASK_CRASH_FEEDBACK_PROMPT,
+    PPO_TUNING_TASK_FORMAT_ERROR_FEEDBACK_PROMPT,
     PPO_TUNING_TASK_SUCCESS_PRE_FEEDBACK_PROMPT,
     PPO_TUNING_TASK_SUCCESS_POST_FEEDBACK_PROMPT,
 )
 from isaaclab_eureka.managers import EurekaTaskManager, LLMManager
-from isaaclab_eureka.utils import load_tensorboard_logs
+from isaaclab_eureka.utils import load_tensorboard_logs, TrainingStatus
 
 
 class Eureka:
@@ -50,10 +52,11 @@ class Eureka:
         gpt_model: str = "gpt-4",
         num_parallel_runs: int = 1,
         env_type: str = "",
-        task_type: str = "reward_weight_tuning",
+        eureka_task: str = "reward_weight_tuning",
         parameters_to_tune: list[str] = [],
         warmstart: bool = False,
         num_envs: int = 1024,
+        resume: dict = {'enabled':False, 'resume_path': ""},
     ):
         """Initialize the Eureka class.
 
@@ -88,18 +91,21 @@ class Eureka:
         self._feedback_subsampling = feedback_subsampling
         self._num_processes = num_parallel_runs if env_type == "manager_based" else 1
         self._success_metric_string = success_metric_string
-        self.task_success_reward_name = TASK_SUCCESS_REWARD_NAME_DICT[task]
+        if env_type == "manager_based":
+            self.task_success_reward_name = TASK_SUCCESS_REWARD_NAME_DICT[task]
+        else:
+            self.task_success_reward_name = None
         print("[INFO]: Setting up the LLM Manager...")
         self._llm_manager = LLMManager(
             gpt_model=gpt_model,
-            num_suggestions=self._num_processes,
+            num_suggestions=1,
             temperature=temperature,
-            system_prompt=self._get_system_prompt(env_type, task_type),
             env_type=env_type,
-            task_type=task_type,
+            eureka_task=eureka_task,
             parameters_to_tune=parameters_to_tune,
         )
-        # this should apply to all manager based, so fix later
+        # set system prompt
+        self._llm_manager.append_system_prompt(self._get_system_prompt(env_type=env_type, eureka_task=eureka_task))
         if self._num_processes > 1:
             self._llm_manager.append_to_system_prompt(
                 MULTIPLE_SUGGESTIONS_INSTRUCTION.format(
@@ -107,7 +113,7 @@ class Eureka:
                 )
                 + MULTIPLE_SUGGESTIONS_EXAMPLE
             )
-
+        self._resume = resume
         print("[INFO]: Setting up the Task Manager...")
         self._task_manager = EurekaTaskManager(
             task=task,
@@ -118,7 +124,7 @@ class Eureka:
             max_training_iterations=max_training_iterations,
             success_metric_string=success_metric_string,
             env_type=env_type,
-            task_type=task_type,
+            eureka_task=eureka_task,
             parameters_to_tune=parameters_to_tune,
             warmstart=warmstart,
             num_envs=num_envs,
@@ -132,7 +138,7 @@ class Eureka:
                 "logs",
                 "eureka",
                 task,
-                task_type,
+                eureka_task,
                 "warmstart",
                 timestamp,
             )
@@ -143,7 +149,7 @@ class Eureka:
                 "logs",
                 "eureka",
                 task,
-                task_type,
+                eureka_task,
                 "randstart",
                 timestamp,
             )
@@ -222,96 +228,140 @@ class Eureka:
         Args:
             max_eureka_iterations: The maximum number of Eureka iterations to run.
         """
-        # Initial prompts
-        # temporary fix, bc with weight tuning the initial prompt is not used
-        context_code_string = self.read_env_source_code(self._task_manager._task)
-        ppo_algo_code_string = self.read_ppo_source_code(self._task_manager._rl_library)
-        print("READING SOURCE CODE COMPLETE")
-        if self._task_manager._task_type == "reward_weight_tuning":
-            self._llm_manager.feed_context_code(context_code_string)
-        if self._task_manager._task_type == "ppo_tuning":
-            self._llm_manager.feed_context_code(ppo_algo_code_string)
-        print("FEEDING SOURCE CODE COMPLETE")
-        if self._task_manager._task_type == "ppo_tuning":
-            user_prompt = MANAGER_BASED_PPO_TUNING_TASK_PROMPT.format(
-                task_description=self._task_description,
-                success_metric_to_win=self._success_metric_to_win,
-            )
-            user_prompt += " Here is the initial configuration of ppo parameters\n"
-        else:
-            user_prompt = MANAGER_BASED_WEIGHT_TUNING_TASK_PROMPT.format(
-                task_description=self._task_description,
-                success_metric_to_win=self._success_metric_to_win,
-            )
-            user_prompt += " Here is the initial configuration of reward term weights\n"
-        if self._task_manager._get_initial_tuning_as_string is not None:
-            user_prompt += self._task_manager._get_initial_tuning_as_string
-        # user_prompt += context_code_string
-        # The assistant prompt is used to feed the previous LLM output back into the LLM
-        assistant_prompt = self._task_manager._get_initial_tuning_as_string
+        #  context_code_string = self.read_env_source_code_brute(self._task_manager._task)
+        smart_context_code_string = self._task_manager._context_code_string
+        success_metric_code_string = self.read_success_metric_code()
+
+        if self._task_manager._eureka_task == "reward_weight_tuning":
+            self._llm_manager.append_user_prompt(smart_context_code_string)
+            print("APPENDING CONTEXT CODE COMPLETE")
+
+        if self._task_manager._eureka_task == "ppo_tuning":
+            ppo_algo_code_string = self.read_ppo_source_code(self._task_manager._rl_library) 
+            self._llm_manager.append_user_prompt(ppo_algo_code_string)
+            print("APPENDING PPO CODE COMPLETE")
+
+        self._llm_manager.append_user_prompt(success_metric_code_string)
+        print("APPENDING SUCCESS METRIC CODE COMPLETE")
+
+        if self._resume["enabled"]:
+            prev_iterations_txt = self.read_prev_iterations()   
+            self._llm_manager.append_user_prompt(prev_iterations_txt)
+            print("RESUME == TRUE, APPENDING PREVIOUS ITERATIONS COMPLETE")
+        print("APPENDING ALL COMPLETE")
+
+        # this part was for calling the LLM the first time
+        # However, now that we first run the training with initial tuning as in the code,
+        # and then call the LLM with training results, we don't need this anymore
+
+        # if self._task_manager._eureka_task == "ppo_tuning":
+        #     user_prompt = MANAGER_BASED_PPO_TUNING_TASK_PROMPT.format(
+        #         task_description=self._task_description,
+        #         success_metric_to_win=self._success_metric_to_win,
+        #     )
+        #     user_prompt += " Here is the initial configuration of ppo parameters\n"
+        # else:
+        #     user_prompt = MANAGER_BASED_WEIGHT_TUNING_TASK_PROMPT.format(
+        #         task_description=self._task_description,
+        #         success_metric_to_win=self._success_metric_to_win,
+        #     )
+        #     user_prompt += " Here is the initial configuration of reward term weights\n"
+        # if self._task_manager._get_initial_tuning_as_string is not None:
+        #     user_prompt += self._task_manager._get_initial_tuning_as_string
+        # user_prompt += context_code_string     
+        #  assistant_prompt = self._task_manager._get_initial_tuning_as_string
 
         # The best run across all iterations
         best_run_results = {"success_metric": None}
-        gpt_weight_strings = []
+        gpt_weight_strings = [None]*self._num_processes
         llm_outputs = None
-        for iter in range(max_eureka_iterations):
-            print(f"\n{'#' * 20} Running Eureka Iteration {iter} {'#' * 20} \n")
-            # Get new weights from LLM, from iter==1
-            print('LLM MANAGER PROMPTING START')
-            llm_outputs = self._llm_manager.prompt_weights(
-                user_prompt=user_prompt, assistant_prompt=assistant_prompt
-            )
-            print('LLM MANAGER PROMPTING COMPLETE')
-            gpt_weight_strings = llm_outputs["weight_strings"]
-            if iter == 0:
-                # if warmstart, overwrite gpt_weight_strings with the initial tuning string
-                for i in range(len(gpt_weight_strings)):
-                    gpt_weight_strings[i] = (
-                        self._task_manager._get_initial_tuning_as_string
+        raw_output = None
+        try: 
+            for iter in range(max_eureka_iterations):
+
+                print(f"\n{'#' * 20} Running Eureka Iteration {iter} {'#' * 20} \n")
+                # WORKAROUND
+                # For 0th iteration, we just use initial tuning from the code
+                # only one process will train, the other processes will intentionally skip training
+                if iter == 0:
+                    if self._resume["enabled"]:
+                        # 0th iter but resume, so call llm
+                        print("RESUME == TRUE, CALLING LLM FROM 0TH ITER")
+                        if self._task_manager._eureka_task == "reward_weight_tuning":
+                            self._llm_manager.append_user_prompt(MANAGER_BASED_WEIGHT_TUNING_INITIAL_PROMPT)
+                        if self._task_manager._eureka_task == "ppo_tuning":
+                            self._llm_manager.append_user_prompt(MANAGER_BASED_PPO_TUNING_INITIAL_PROMPT)
+                        llm_outputs = self._llm_manager.call_llm()
+                        print('LLM MANAGER CALLING COMPLETE')
+                        gpt_weight_strings = llm_outputs["weight_strings"]
+                        raw_output = llm_outputs["raw_output"]
+                    else:
+                        # 0th iter fresh start, populate gpt_weight_strings with initial tuning
+                        print()
+                        for i in range(self._num_processes):
+                            gpt_weight_strings[i] = ""
+                        gpt_weight_strings[0] = self._task_manager._get_initial_tuning_as_string
+                else:           
+                    # Get new weights from LLM, from iter==1
+                    print('LLM MANAGER CALLING START')
+                    if raw_output is not None:
+                        # 0th iter: doesn't even call llm
+                        # 1st iter: calls llm but only with user prompt
+                        # 2nd iter ~ : assistant prompt is available
+                        self._llm_manager.append_assistant_prompt(raw_output)
+                    # 1st iter: user_prompt is generated from 0th iter training result
+                    self._llm_manager.append_user_prompt(user_prompt)
+                    llm_outputs = self._llm_manager.call_llm()
+                    print('LLM MANAGER CALLING COMPLETE')
+                    gpt_weight_strings = llm_outputs["weight_strings"]
+                    raw_output = llm_outputs["raw_output"]
+                # Do I need this part?
+                # for idx, gpt_reward_method_string in enumerate(gpt_weight_strings):
+                #     self._tensorboard_writer.add_text(
+                #         f"Run_{idx}/raw_llm_output", gpt_reward_method_string, iter
+                #     )
+                # Train the RL agent
+                print('STARTING TASK MANAGER TRAIN')
+                results = self._task_manager.train(gpt_weight_strings)
+                print('TASK MANAGER TRAIN COMPLETE')
+                # bad fix, gpt_weight_strings is empty at iter==0 so use prev_weights_str instead
+                # Evaluate the results
+                # llm_outputs["raw_outputs"] is the raw response string
+
+                results, best_run_results, best_run_idx = (
+                    self.evaluate_results_weight_tuning(
+                        results, best_run_results
                     )
-            # Log the llm outputs
-            for idx, gpt_reward_method_string in enumerate(gpt_weight_strings):
-                self._tensorboard_writer.add_text(
-                    f"Run_{idx}/raw_llm_output", gpt_reward_method_string, iter
                 )
-            # Train the RL agent
-            print('STARTING TASK MANAGER TRAIN')
-            results = self._task_manager.train(gpt_weight_strings)
-            # bad fix, gpt_weight_strings is empty at iter==0 so use prev_weights_str instead
-            # Evaluate the results
-            # llm_outputs["raw_outputs"] == [response.message.content], a list of length 1
-            # llm_outputs["raw_outputs"][0] is the raw response string
-            results, best_run_results, best_run_idx = (
-                self.evaluate_results_weight_tuning(
-                    results, llm_outputs, best_run_results, gpt_weight_strings
-                )
-            )
 
-            self._log_iteration_results(iter, results)
+                self._log_iteration_results(iter, results, raw_output)
 
-            if (
-                best_run_results["success_metric"] is not None
-                and np.abs(
-                    best_run_results["success_metric"] - self._success_metric_to_win
-                )
-                < self._success_metric_tolerance
-            ):
-                print(
-                    f"Task solved with success metric: {best_run_results['success_metric']}"
-                )
-                break
+                if (
+                    best_run_results["success_metric"] is not None
+                    and np.abs(
+                        best_run_results["success_metric"] - self._success_metric_to_win
+                    )
+                    < self._success_metric_tolerance
+                ):
+                    print(
+                        f"Task solved with success metric: {best_run_results['success_metric']}"
+                    )
+                    break
 
-            assistant_prompt = (
-                results[best_run_idx]["assistant_prompt"]
-                if iter == 0
-                else results[best_run_idx]["assistant_prompt"]
-                + results[best_run_idx]["raw_llm_output"]
-            )
-            user_prompt = results[best_run_idx]["user_prompt"]
-
-        self._log_final_results(best_run_results, iter)
-        # Close the task manager
-        self._task_manager.close()
+                
+                user_prompt = results[best_run_idx]["user_prompt"]
+        except Exception as e:
+            print(f"An error occurred during the Eureka training loop {iter}:")
+            print(e)
+            traceback.print_exc()
+            # Handle the error as needed
+                
+        finally:
+            self._log_final_results(best_run_results, iter)
+            self._log_conversation()
+            # Close the task manager
+            print("CLOSING TASK MANAGER")
+            self._task_manager.close()
 
     def _get_eureka_task_feedback(
         self, log_dir: str, feedback_subsampling: int
@@ -409,40 +459,27 @@ class Eureka:
             A tuple containing the feedback string, the maximum of the success metric, and the correlation between the oracle and GPT rewards.
         """
 
-        data = load_tensorboard_logs(log_dir)
+        # filtered data from tensorboard logs
+        # data is a list of tuples (key, value), in order
+        data = self.extract_relevant_metrics(log_dir=log_dir)
 
         success_metric_max = None
 
-        # overwrite Eureka/success_metric data with task specific reward term
-        def find_matching_key(data, suffix):
+        def find_actual_iterations(data, suffix):
             """Find the correct key in `data` that ends with the given suffix."""
-            for key in data.keys():
+            for key, value in data:
                 if key.endswith(suffix):
-                    return key
-            if suffix == "Eureka/success_metric":
-                # If the key is not found, return a default value
-                return "Eureka/success_metric"
+                    return len(value)
             raise KeyError(
                 f"Could not find a key ending with '{suffix}' in TensorBoard logs."
             )
 
-        # Find the correct keys dynamically
-        success_metric_key = find_matching_key(data, "Eureka/success_metric")
-        reward_term_key = find_matching_key(
-            data,
-            "Episode_Reward/" + TASK_SUCCESS_REWARD_NAME_DICT[self._task_manager._task],
-        )
-
-        # Overwrite Eureka/success_metric with the correct reward term data
-        # skrl tensorboard log doesn't create Eureka/success_metric
-        # for skrl, Eureka/success_metric will not show up in tensorboard
-        data[success_metric_key] = data[reward_term_key]
-        actual_training_iterations = len(data[success_metric_key])
+        actual_training_iterations = find_actual_iterations(data, "Eureka/success_metric")
         adaptive_feedback_subsampling = actual_training_iterations // feedback_subsampling
         # TODO really need to clean this up
         total_feed_back_string = ""
         # just give everything, hope that llm can figure it out
-        for metric_name, metric_data in data.items():
+        for metric_name, metric_data in data:
             if len(metric_data) > 2:
                 metric_data = metric_data[2:]
             metric_min = min(metric_data)
@@ -450,7 +487,6 @@ class Eureka:
             metric_mean = sum(metric_data) / len(metric_data)
             # Best metric is the one closest to the target
             if "Eureka/success_metric" in metric_name:
-                metric_name = "task_score"
                 metric_best = metric_data[
                     np.abs(
                         np.array(metric_data) - self._success_metric_to_win
@@ -473,46 +509,50 @@ class Eureka:
             total_feed_back_string += feedback_string
 
         total_feed_back_string += (
-            f"\nThe desired task_score to win is: {self._success_metric_to_win:.2f}\n"
+            f"\nThe desired Eureka/success_metric to win is: {self._success_metric_to_win:.2f}\n"+
+            f"Other fields under Eureka/ are intermediate values used to compute Eureka/success_metric, as given in compute_success_metric() function.\n"
         )
         total_feed_back_string += f"The agent is trained using {self._task_manager._rl_library} library.\n"
         total_feed_back_string += f"Each metric was sampled at every {adaptive_feedback_subsampling} learning iterations.\n"
         total_feed_back_string += f"Max learning iteration was set to {self._task_manager._max_training_iterations}, and the actual training had {actual_training_iterations} learning iterations.\n"
-        total_feed_back_string += f"Note that a curriculum may have been setup to change reward weights to a certain value after a certain number of training iterations.\n"
-        total_feed_back_string += f"If you see a reward term dramatically changing its magnitude order, a curriculum might have been at play.\n"
+        total_feed_back_string += f"Recall that there may be curriculums acting on individual reward terms.\n"
         return total_feed_back_string, success_metric_max, 0
 
-    def _log_iteration_results(self, iter: int, results: list):
+    def _log_iteration_results(self, iter: int, results: list, raw_output: str):
         """Log the results of the iteration."""
-        for idx, result in enumerate(results):
-            print(f"{'*' * 20} Iteration {iter} / Process: {idx} {'*' * 20}")
-            if result["success"]:
-                print(
-                    f"Training successful with the following metrics:\n{result['eureka_task_feedback']}"
-                )
-                print(
-                    f"Reward correlation with oracle rewards: {result['rewards_correlation']}"
-                )
-            else:
-                print(
-                    f"Training failed with the following exception:\n{result['exception']}\n"
-                )
+        # for idx, result in enumerate(results):
+        #     print(f"{'*' * 20} Iteration {iter} / Process: {idx} {'*' * 20}")
+        #     if result["success"]:
+        #         print(
+        #             f"Training successful with the following metrics:\n{result['eureka_task_feedback']}"
+        #         )
+        #         print(
+        #             f"Reward correlation with oracle rewards: {result['rewards_correlation']}"
+        #         )
+        #     else:
+        #         print(
+        #             f"Training failed with the following exception:\n{result['exception']}\n"
+        #         )
 
         # write the iterations results to file
         with open(f"{self._log_dir}/eureka_iterations.txt", "a") as f:
-            for idx, result in enumerate(results):
-                if iter == 0:
-                    if self._task_manager._warmstart:
-                        f.write(f"Using Warmstart\n")
-                    else:
-                        f.write(f"Using Randstart\n")
+            if iter == 0:
+                if self._resume["enabled"]:
+                    f.write(f"Resuming from previous iterations\n")
+                    f.write(f"{self._resume['prev_iterations_path']}\n\n")
+                elif self._task_manager._warmstart:
+                    f.write(f"Using Warmstart\n\n")
+                else:
+                    f.write(f"Using Randstart\n\n")
+            if raw_output is not None:
                 f.write(f"{'#' * 20} Iteration: {iter} {'#' * 20}\n\n")
-                f.write(f"{'*' * 20} Run: {idx} {'*' * 20}\n")
-                f.write(f"- GPT reward method {result['assistant_prompt']}\n")
-                if not (iter == 0):
-                    wrapped_output = textwrap.fill(result["raw_llm_output"], width=100)
-                    f.write(f"GPT reasoning:\n{wrapped_output}\n\n")
-                if result["success"]:
+                wrapped_output = textwrap.fill(raw_output, width=150)
+                f.write(f"GPT reasoning:\n{wrapped_output}\n\n")
+            for idx, result in enumerate(results):
+                f.write(f"{'#' * 20} Iteration: {iter} {'#' * 20}\n\n")
+                f.write(f"{'*' * 20} Process: {idx} {'*' * 20}\n")
+                if result["success"] == TrainingStatus.SUCCESS:
+                    f.write(f"- Configuration: \n{result['prev_config']}\n")
                     f.write(
                         f"Training successful with the following metrics:\n{result['eureka_task_feedback']}\n"
                     )
@@ -520,33 +560,44 @@ class Eureka:
                     #     f"Reward correlation with oracle rewards:\n{result['rewards_correlation']}\n"
                     # )
                     self._tensorboard_writer.add_scalar(
-                        f"Run_{idx}/success_metric", result["success_metric_max"], iter
+                        f"Process_{idx}/success_metric", result["success_metric_max"], iter
                     )
-                else:
+                    self._tensorboard_writer.add_text(
+                    f"Process_{idx}/run_feedback", result["user_prompt"], iter
+                    )
+                if result["success"] == TrainingStatus.CRASH:
+                    f.write(f"- Configuration: \n{result['prev_config']}\n")
                     f.write(
-                        f"Training failed with the following exception:\n{result['exception']}\n"
+                        f"Training crashed with the following exception:\n{result['exception']}\n"
                     )
                     f.write(
                         f"Training metrics are:\n{result['eureka_task_feedback']}\n"
                     )
                     self._tensorboard_writer.add_scalar(
-                        f"Run_{idx}/success_metric", result["success_metric_max"], iter
+                        f"Process_{idx}/success_metric", result["success_metric_max"], iter
                     )
-                self._tensorboard_writer.add_text(
-                    f"Run_{idx}/run_feedback", result["user_prompt"], iter
-                )
+                    self._tensorboard_writer.add_text(
+                    f"Process_{idx}/run_feedback", result["user_prompt"], iter
+                    )
+                if result["success"] == TrainingStatus.FORMAT_ERROR:
+                    f.write(
+                        f"Wrong string format, training didn't run:\n{result['exception']}\n"
+                    )
                 f.write("\n")
 
     def _log_final_results(self, best_run_results: dict, iter):
         """Log the final results of the Eureka run."""
         output = ""
-        if self._task_manager._warmstart:
+        if self._resume["enabled"]:
+            output += f"Resuming from previous iterations\n"
+            output += f"{self._resume['prev_iterations_path']}\n"
+        elif self._task_manager._warmstart:
             output += f"Using Warmstart\n"
         else:
             output += f"Using Randstart\n"
         if best_run_results["success_metric"] is not None:
             output += f"- Success metric: {best_run_results['success_metric']}\n"
-            output += f"- GPT reward method: {best_run_results['gpt_reward_method']}\n"
+            output += f"- GPT config: {best_run_results['gpt_reward_method']}\n"
             output += f"- Task metrics:\n{best_run_results['task_feedback']}\n"
         else:
             output += "- No successful training run\n"
@@ -568,6 +619,13 @@ class Eureka:
         print(f"Final output: {output}")
         with open(f"{self._log_dir}/eureka_final_result.txt", "w") as f:
             f.write(output)
+    
+    def _log_conversation(self):
+        with open(f"{self._log_dir}/eureka_conversation.txt", "w") as f:
+            for chat in self._llm_manager._prompts:
+                f.write(f"{chat['role']}: \n")
+                f.write(f"{chat['content']}\n\n")
+
 
     def evaluate_results(
         self, results, llm_outputs, best_run_results, gpt_reward_method_strings
@@ -636,56 +694,84 @@ class Eureka:
         return results, best_run_results, best_run_idx
 
     def evaluate_results_weight_tuning(
-        self, results, llm_outputs, best_run_results, gpt_reward_method_strings
+        self, results, best_run_results
     ):
         iter_best_success_metric = None
         best_run_idx = 0
 
         for idx, result in enumerate(results):
-                # Compute the performance metrics
-            eureka_task_feedback, success_metric_max, rewards_correlation = (
-                self._get_eureka_task_feedback_manager_based(
-                    result["log_dir"], self._feedback_subsampling
+
+            if "log_dir" in result: 
+                # There is training data
+                eureka_task_feedback, success_metric_max, rewards_correlation = (
+                    self._get_eureka_task_feedback_manager_based(
+                        result["log_dir"], self._feedback_subsampling
+                    )
                 )
-            )
-            if not result["success"]:
-                if self._task_manager._task_type == "reward_weight_tuning":
-                    user_feedback_prompt = (
-                        WEIGHT_TUNING_TASK_FAILURE_FEEDBACK_PROMPT 
-                        + result["exception"] 
-                        + eureka_task_feedback
-                    )
-                
-                if self._task_manager._task_type == "ppo_tuning":
-                    user_feedback_prompt = (
-                        PPO_TUNING_TASK_FAILURE_FEEDBACK_PROMPT 
-                        + result["exception"] 
-                        + eureka_task_feedback
-                    )
             else:
-                # Generate the user feedback prompt
-                if self._task_manager._task_type == "reward_weight_tuning":
+                # training didn't even run, set success metric to -inf
+                eureka_task_feedback = ""
+                success_metric_max = -np.inf
+                rewards_correlation = 0
+
+            # SUCCESS, CRASH, FORMAT_ERROR, SKIPPED
+            if result["success"] == TrainingStatus.SUCCESS:
+                if self._task_manager._eureka_task == "reward_weight_tuning":
                     user_feedback_prompt = (
                         WEIGHT_TUNING_TASK_SUCCESS_PRE_FEEDBACK_PROMPT.format(
                             feedback_subsampling=self._feedback_subsampling
                         )
+                        + result["prev_config"] + "\n\n"
                         + eureka_task_feedback
                         + WEIGHT_TUNING_TASK_SUCCESS_POST_FEEDBACK_PROMPT
                     )
-                if self._task_manager._task_type == "ppo_tuning":
+                if self._task_manager._eureka_task == "ppo_tuning":
                     user_feedback_prompt = (
                         PPO_TUNING_TASK_SUCCESS_PRE_FEEDBACK_PROMPT.format(
                             feedback_subsampling=self._feedback_subsampling
                         )
+                        + result["prev_config"] + "\n\n"
                         + eureka_task_feedback
                         + PPO_TUNING_TASK_SUCCESS_POST_FEEDBACK_PROMPT
+                    )
+            if result["success"] == TrainingStatus.CRASH:
+                if self._task_manager._eureka_task == "reward_weight_tuning":
+                    user_feedback_prompt = (
+                        WEIGHT_TUNING_TASK_CRASH_FEEDBACK_PROMPT 
+                        + result["exception"] 
+                        + result["prev_config"] + "\n\n"
+                        + eureka_task_feedback
+                    )
+                
+                if self._task_manager._eureka_task == "ppo_tuning":
+                    user_feedback_prompt = (
+                        PPO_TUNING_TASK_CRASH_FEEDBACK_PROMPT 
+                        + result["exception"] 
+                        + result["prev_config"] + "\n\n"
+                        + eureka_task_feedback
+                    )
+            if result["success"] == TrainingStatus.FORMAT_ERROR:
+                if self._task_manager._eureka_task == "reward_weight_tuning":
+                    user_feedback_prompt = (
+                        WEIGHT_TUNING_TASK_FORMAT_ERROR_FEEDBACK_PROMPT 
+                        + result["exception"] 
+                        + f'\nThis is your previous suggestion: {result["prev_config"]}\n'
+                        + f"However, the string must follow the format: {self._task_manager._get_initial_tuning_as_string}\n"
+                    )
+                
+                if self._task_manager._eureka_task == "ppo_tuning":
+                    user_feedback_prompt = (
+                        PPO_TUNING_TASK_FORMAT_ERROR_FEEDBACK_PROMPT 
+                        + result["exception"] 
+                        + f'\nThis is your previous suggestion: {result["prev_config"]}\n'
+                        + f"However, the string must follow the format: {self._task_manager._get_initial_tuning_as_string}\n"
                     )
 
                 # Store the results
             results[idx]["eureka_task_feedback"] = eureka_task_feedback
             results[idx]["success_metric_max"] = success_metric_max
             results[idx]["rewards_correlation"] = rewards_correlation
-
+            results[idx]["user_prompt"] = user_feedback_prompt
                 # Check the best performing metric, determined by the minimum distance from the win target
             if success_metric_max is not None and (
                 iter_best_success_metric is None
@@ -706,42 +792,39 @@ class Eureka:
             ):
                 best_run_results["success_metric"] = iter_best_success_metric
                 best_run_results["gpt_reward_method"] = (
-                    gpt_reward_method_strings[idx]
+                    results[idx]["prev_config"]
                 )
                 best_run_results["task_feedback"] = eureka_task_feedback
 
-        # Add the prompts
-        results[idx]["user_prompt"] = user_feedback_prompt
-        results[idx]["assistant_prompt"] = gpt_reward_method_strings[idx]
-        results[idx]["raw_llm_output"] = llm_outputs["raw_outputs"][idx]
+            
         return results, best_run_results, best_run_idx
 
-    def _get_system_prompt(self, env_type, task_type) -> str:
+    def _get_system_prompt(self, env_type, eureka_task) -> str:
         """Determine the appropriate system prompt based on env_type and task_type."""
 
         prompts = {
             (
                 "manager_based",
                 "reward_weight_tuning",
-            ): MANAGER_BASED_WEIGHT_TUNING_INITIAL_PROMPT
-            + f"\n NEVER change reward weight for {self.task_success_reward_name} term. This term is used to compute task success metric. Changing its weight is the same as cheating the task success metric.",
+            ): MANAGER_BASED_WEIGHT_TUNING_INITIAL_PROMPT,
+            
             ("manager_based", "ppo_tuning"): MANAGER_BASED_PPO_TUNING_INITIAL_PROMPT,
             ("direct", "reward_weight_tuning"): DIRECT_WORKFLOW_INITIAL_PROMPT,
         }
 
         # Default to a generic prompt if no specific case is found
-        return prompts[(env_type, task_type)]
+        return prompts[(env_type, eureka_task)] + f"The task is: {self._task_description}"
 
-    def read_env_source_code(self, task):
+    def read_env_source_code_brute(self, task):
         """Recursively read all .py files in the mdp and task-specific directory inside IsaacLab."""
         import re
 
-        base_dir = "/workspace/isaaclab/source/isaaclab_tasks/isaaclab_tasks/sbtc/manager_based"
+        base_dir = "/workspace/isaaclab/source/isaaclab_tasks/isaaclab_tasks/sbtc_tasks/manager_based"
 
         # 🔹 Extract task type dynamically (e.g., SBTC-Lift-Cube-Franka-OSC-v0 → sbtc_lift)
         match = re.search(r"SBTC-([A-Za-z]+)", task)
-        task_type = match.group(1).lower() if match else ""
-        task_folder = f"sbtc_{task_type}"  # Convert to folder format: "sbtc_lift", "sbtc_reach", etc.
+        rl_task_type = match.group(1).lower() if match else ""
+        task_folder = f"sbtc_{rl_task_type}"  # Convert to folder format: "sbtc_lift", "sbtc_reach", etc.
 
         # 🔹 Define directories to read: always mdp + detected task folder
         directories_to_read = [os.path.join(base_dir, "mdp")]
@@ -812,3 +895,68 @@ class Eureka:
             return intro + source_code
         except FileNotFoundError:
             raise FileNotFoundError(f"PPO source code not found at {ppo_file_path}")
+        
+    def read_prev_iterations(self) -> str:
+        """Read the previous iterations of the task and return them as a string."""
+        prev_iterations_path = self._resume["prev_iterations_path"]
+        try:
+            with open(prev_iterations_path, "r", encoding="utf-8") as f:
+                prev_iterations = f.read()
+            intro="Previous eureka run ended abruptly. Here is the information from the previous run.\n"
+            return intro + prev_iterations
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Previous iterations file not found at {prev_iterations_path}")
+    
+
+    def read_success_metric_code(self) -> str:
+        """Read the success metric code and return it as a string."""
+        success_metric_path = f"/workspace/isaaclab/_isaaclab_eureka/source/isaaclab_eureka/isaaclab_eureka/success_metric/{self._task_manager._rl_task_type}.py"
+
+        try:
+            with open(success_metric_path, "r", encoding="utf-8") as f:
+                success_metric_code = f.read()
+            intro = f"This is how we define success metric for the given task: {self._task_description}.\n"
+            return success_metric_code
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Success metric code not found at {success_metric_path}")
+        
+    def extract_relevant_metrics(self, log_dir) -> list[tuple[str, list]]:
+        import re
+        data = load_tensorboard_logs(log_dir)
+
+        # Define patterns and preferred order
+        if self._task_manager._eureka_task == "reward_weight_tuning":
+            ordered_patterns = [
+                r".*Eureka/success_metric$",
+                r".*Eureka/.+",
+                r".*Episode_Reward/.+",
+                r".*Reward / Total reward.+",
+                r".*Reward / Instantaneous reward.+",
+                r".*Train/mean_reward$",
+            ]
+        elif self._task_manager._eureka_task == "ppo_tuning":
+            ordered_patterns = [
+                r".*Eureka/success_metric$",
+                r".*Loss\s*/\s*.+",
+                r".*Policy\s*/\s*.+",
+                r".*Learning rate",
+                r".*Train/mean_reward$",
+                r".*Train/mean_episode_length$",
+                r".*Reward / Total reward.+",
+                r".*Reward / Instantaneous reward.+",
+            ]
+        else:
+            raise ValueError(
+                f"Unsupported eureka task: {self._task_manager._eureka_task}. Choose from ['reward_weight_tuning', 'ppo_tuning']"
+            )
+        filtered_data = []
+        seen = set()
+
+        # Apply each pattern in order
+        for pattern in ordered_patterns:
+            for key in sorted(data.keys()):
+                if key not in seen and re.match(pattern, key):
+                    filtered_data.append((key, data[key]))
+                    seen.add(key)
+
+        return filtered_data

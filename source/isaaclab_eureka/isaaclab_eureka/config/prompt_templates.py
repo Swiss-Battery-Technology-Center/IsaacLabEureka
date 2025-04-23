@@ -27,29 +27,30 @@ Some helpful tips for writing the reward function code:
 """
 
 MANAGER_BASED_WEIGHT_TUNING_FORMATTING_INSTRUCTIONS = """
-Your weight tuning string should comply exactly with the following structure, so that it is compatible with the ast.literal_eval function.
-    {'reward_term_name_1': weight_1, 'reward_term_name_2': weight_2, ...}
-I will use regex pattern of the above structure to extract the reward term names and weights from your response. 
-Make sure your weight tuning string is easy to extract.
-reward_term_name is a string and must be enclosed by a single quote.
-weight is a float value.
-Assistant prompt provides the previous configuration of reward terms and corresponding weights.
-Only use the exact same reward term names from the previous configuration. Do not introduce new reward terms or remove existing ones.
-Negative weights are posssible, terms with negative weights serve as penalty rather than reward.
+Your new configuraiton string should comply exactly with the structure of the previous configuration, which will be given in user prompts.
+It will generally look like:
+    {'reward.term_name.weight': value_1, 'curriculum.term_name.param_name': value_2, ...}
+I will use regex pattern of the above structure to extract the keys and values from your response. 
+Use the same keys as the previous configuration, but suggest new values.
+A key, 'reward.term_name.weight' for example, is a string enclosed by a single quote. The dots inside are used to reconstruct a nested dictionary.
+The value will be mostly float or int, but always comply with the type of the previous configuration.
+Negative reward weights are posssible, terms with negative weights serve as penalty rather than reward.
+Note that num_step values in curriculum is in units of simulation steps, which is 24 * learning iterations.
+For example, if num_step_start is 4800, the curriculum starts at 4800/24 = 200 learning iterations.
+When you suggest new num_step values, please make sure they are multiples of 24.
+By common sense, 0 < num_step_start < num_step_end < 24 * max_learning_iterations.
+You are not obliged to change all values. If a certain value was good in the previous run, you can keep it as it is.
+If training is not going well, you are encouraged to make wild guesses.
 """
 
 MANAGER_BASED_PPO_TUNING_FORMATTING_INSTRUCTIONS = """
-Your ppo hyperparameter tuning string should comply exactly with the following structure, so that it is compatible with the ast.literal_eval function.
+Your ppo hyperparameter tuning string should comply exactly with the previous tuning configuration, which will be given in user prompts.
     {'param_name_1': value_1, 'param_name_2': value_2, ...}
-I will use regex pattern of the above structure to extract the reward term names and weights from your response. 
-Then I will use ast.literal_eval function to convert the string to a dictionary.
-Make sure your ppo hyperparameter tuning string is easy to extract.
+I will use regex pattern of the above structure to extract the ppo hyperparameters and suggested tuning values from your response.
 param_name is a string and must be enclosed by a single quote.
 param_name may contain dots, such as "agent.learning_rate_scheduler_kwargs.kl_threshold". Dots indicate a deeper level of nested dictionary.
-value can be float or boolean.
-Assistant prompt provides the previous configuration of ppo hyperparameter names and values.
-Only use the exact same param_names from the previous configuration with correct value type. Do not introduce new parameters or remove existing ones.
-Note, if you think value of a certain parameter wsas good in the previous run, you can keep it as it is. You are not obliged to change all values, especially the boolean ones.
+value can be float or boolean, but always comply with the type of the previous configuration.
+Note, if you think value of a certain parameter was good in the previous run, you can keep it as it is. You are not obliged to change all values, especially the boolean ones.
 """
 
 MULTIPLE_SUGGESTIONS_INSTRUCTION = """
@@ -57,13 +58,16 @@ I want to do evolutionary search for the hyperparameters, so please provide {num
 """
 MULTIPLE_SUGGESTIONS_EXAMPLE ="""
 For ease of extraction, your respose should look like,
+
 Suggestion 1
 {'param_name_1': value_1, 'param_name_2': value_2, ...}
-Suggestion 2
+
+...
+
+Suggestion N
 {'param_name_1': value_1, 'param_name_2': value_2, ...}
-Suggestion 3
-{'param_name_1': value_1, 'param_name_2': value_2, ...}
- and so on.
+
+After which you should add your analysis of the previous training run and explain why you think the new suggestions are better.
 """
 
 DIRECT_WORKFLOW_INITIAL_PROMPT = """
@@ -72,16 +76,21 @@ Your goal is to write a reward function for the environment that will help the a
 """ + DIRECT_WORKFLOW_REWARD_FORMATTING_INSTRUCTIONS
 
 MANAGER_BASED_WEIGHT_TUNING_INITIAL_PROMPT = """
-You are a reward engineer trying to tune weights of reward terms to solve reinforcement learning tasks as effective as possible in Isaac Lab manager based environment.
-Your goal is to suggest better weights for reward terms, so that the agent will learn the task described in text faster.
-Note that you are only choosing the initial weights for the reward terms, curriculum might change the weights during training.
+You are a reward engineer trying to tune the environment configuration to solve reinforcement learning tasks as effective as possible in Isaac Lab manager based environment.
+Your goal is to suggest better configuration tuning for the environment, so that the agent will learn the task described in text faster.
+You will be given the source code of the manager based environment, which includes rewards, curriculums, etc. 
+From the source code, you must understand the overarching structure of the environment, and how different components work together to provide dense rewards to facilitate learning of the ultimate task.
+For example, there might be easy reward terms to guide the agent towards ultimate success. There might be curriculum terms that gradually increase the difficulty of the task.
+You will also be given the source code of success metric, which computes the ratio of environments that accomplished given task, according to our Eureka/success_metric.
+Eventually, you want to achieve desired success metric.
+You will be given training progress and the configuration used in training, such as reward and curriculum.
+Leverage your understanding of the environment to analyze the training progress and suggest better configurations.
 """ + MANAGER_BASED_WEIGHT_TUNING_FORMATTING_INSTRUCTIONS
 
 MANAGER_BASED_PPO_TUNING_INITIAL_PROMPT = """
 You are an RL engineer trying to tune hyperparameters of ppo algorithm to solve reinforcement learning tasks as effective as possible in Isaac Lab manager based environment.
 Your goal is to suggest better ppo hyperparameter tunings, so that the agent will learn the task described in text faster.
 Use your knowledge of ppo algorithm and the task description to suggest better ppo hyperparameter tunings.
-Note that due to curriculum, the reward weights might change during training.
 """ + MANAGER_BASED_PPO_TUNING_FORMATTING_INSTRUCTIONS
 
 TASK_FAILURE_FEEDBACK_PROMPT = """
@@ -89,25 +98,33 @@ Executing the reward function code above has the following error: {traceback_msg
 Please fix the bug and provide a new, improved reward function!
 """ + DIRECT_WORKFLOW_REWARD_FORMATTING_INSTRUCTIONS
 
-WEIGHT_TUNING_TASK_FAILURE_FEEDBACK_PROMPT = MANAGER_BASED_WEIGHT_TUNING_FORMATTING_INSTRUCTIONS + """
-Training with previous reward weight configuration above has the following error and dind't reach the maximum learning iterations.
-Please fix the bug and provide a new, improved tuning of reward terms.
+WEIGHT_TUNING_TASK_CRASH_FEEDBACK_PROMPT = MANAGER_BASED_WEIGHT_TUNING_FORMATTING_INSTRUCTIONS + """
+Training with previous reward weight configuration has the following error and dind't reach the maximum learning iterations.
+Please provide a new, improved tuning of reward terms.
 """ 
 
-PPO_TUNING_TASK_FAILURE_FEEDBACK_PROMPT = MANAGER_BASED_PPO_TUNING_FORMATTING_INSTRUCTIONS +"""
-Training with previous ppo hyperparameter configuration above has the following error and didn't reach the maximum learning iterations.
-Please fix the bug and provide a new, improved tuning of ppo hyperparameters.
+PPO_TUNING_TASK_CRASH_FEEDBACK_PROMPT = MANAGER_BASED_PPO_TUNING_FORMATTING_INSTRUCTIONS +"""
+Training with previous ppo hyperparameter configuration has the following error and didn't reach the maximum learning iterations.
+Please provide a new, improved tuning of ppo hyperparameters.
+""" 
+
+WEIGHT_TUNING_TASK_FORMAT_ERROR_FEEDBACK_PROMPT = MANAGER_BASED_WEIGHT_TUNING_FORMATTING_INSTRUCTIONS + """
+Your weight tuning string has some format error. Please comply with the original structure.
+""" 
+
+PPO_TUNING_TASK_FORMAT_ERROR_FEEDBACK_PROMPT = MANAGER_BASED_PPO_TUNING_FORMATTING_INSTRUCTIONS +"""
+Your ppo hyperparameter tuning string has some format error. Please comply with the original structure.
 """ 
 
 TASK_SUCCESS_PRE_FEEDBACK_PROMPT = """
 We trained a RL policy using the provided reward function code and tracked the values of the individual components in the reward function as well as global policy metrics such as success rates and episode lengths after every {feedback_subsampling} epochs and the maximum, mean, minimum values encountered:
 """
 WEIGHT_TUNING_TASK_SUCCESS_PRE_FEEDBACK_PROMPT = """
-We trained a RL policy using the provided weights for reward terms and tracked the values of the individual reward components as well as other policy metrics such as task_score(which represent success rate) and loss. 
+We trained a RL policy using the provided weights for reward terms and tracked the values of the individual reward components as well as other metrics such as Eureka/success_rate. 
 We sampled it {feedback_subsampling} times evenly during training duration. We also tracked maximum, mean, minimum values encountered:
 """
 PPO_TUNING_TASK_SUCCESS_PRE_FEEDBACK_PROMPT = """
-We trained a RL policy using the provided tuning of ppo hyperparameters and tracked the values of the individual reward components as well as other policy metrics such as task_score(which represent success rate) and loss. 
+We trained a RL policy using the provided tuning of ppo hyperparameters and tracked the values of relevant metrics. 
 We sampled it {feedback_subsampling} times evenly during training duration. We also tracked maximum, mean, minimum values encountered:
 """
 TASK_SUCCESS_POST_FEEDBACK_PROMPT = """
@@ -137,11 +154,11 @@ Here is how we get the observations from the environment:
 """
 
 MANAGER_BASED_WEIGHT_TUNING_TASK_PROMPT = """
-Find a good tuning of reward weights for the task: {task_description}
+Find a good configuration of environment for the task: {task_description}
 The desired task score is: {success_metric_to_win}
 """
 
 MANAGER_BASED_PPO_TUNING_TASK_PROMPT = """
-Find a good tuning of ppo hyperparameters for this task: {task_description}
+Find a good tuning of ppo hyperparameters for the task: {task_description}
 The desired task score is: {success_metric_to_win}
 """
