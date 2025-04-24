@@ -5,6 +5,7 @@
 import datetime
 import numpy as np
 import os
+import logging
 import textwrap
 from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 from typing import Literal
@@ -72,65 +73,7 @@ class Eureka:
             gpt_model: The GPT model to use.
             num_parallel_runs: The number of runs to execute in parallel.
         """
-
-        # Load the task description and success metric
-        if task in TASKS_CFG:
-            task_description = TASKS_CFG[task]["description"]
-            success_metric_string = TASKS_CFG[task].get("success_metric")
-            self._success_metric_to_win = TASKS_CFG[task].get("success_metric_to_win")
-            self._success_metric_tolerance = TASKS_CFG[task].get(
-                "success_metric_tolerance"
-            )
-            print(success_metric_string)
-        else:
-            raise ValueError(
-                f"Task configuration for {task} not found in the `TASKS_CFG` dictionary in config/tasks.py."
-            )
-
-        self._task_description = task_description
-        self._feedback_subsampling = feedback_subsampling
-        self._num_processes = num_parallel_runs if env_type == "manager_based" else 1
-        self._success_metric_string = success_metric_string
-        if env_type == "manager_based":
-            self.task_success_reward_name = TASK_SUCCESS_REWARD_NAME_DICT[task]
-        else:
-            self.task_success_reward_name = None
-        print("[INFO]: Setting up the LLM Manager...")
-        self._llm_manager = LLMManager(
-            gpt_model=gpt_model,
-            num_suggestions=1,
-            temperature=temperature,
-            env_type=env_type,
-            eureka_task=eureka_task,
-            parameters_to_tune=parameters_to_tune,
-        )
-        # set system prompt
-        self._llm_manager.append_system_prompt(self._get_system_prompt(env_type=env_type, eureka_task=eureka_task))
-        if self._num_processes > 1:
-            self._llm_manager.append_to_system_prompt(
-                MULTIPLE_SUGGESTIONS_INSTRUCTION.format(
-                    num_parallel_runs=num_parallel_runs
-                )
-                + MULTIPLE_SUGGESTIONS_EXAMPLE
-            )
-        self._resume = resume
-        print("[INFO]: Setting up the Task Manager...")
-        self._task_manager = EurekaTaskManager(
-            task=task,
-            device=device,
-            env_seed=env_seed,
-            rl_library=rl_library,
-            num_processes=self._num_processes,
-            max_training_iterations=max_training_iterations,
-            success_metric_string=success_metric_string,
-            env_type=env_type,
-            eureka_task=eureka_task,
-            parameters_to_tune=parameters_to_tune,
-            warmstart=warmstart,
-            num_envs=num_envs,
-        )
-
-        # Logging
+        # logging comes first
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         if warmstart:
             self._log_dir = os.path.join(
@@ -157,6 +100,68 @@ class Eureka:
         self._tensorboard_writer = TensorboardSummaryWriter(
             log_dir=self._log_dir, flush_secs=10
         )
+        init_eureka_logger(self._log_dir)
+        logging.info("Eureka initializing.")
+
+        # Load the task description and success metric
+        if task in TASKS_CFG:
+            task_description = TASKS_CFG[task]["description"]
+            success_metric_string = TASKS_CFG[task].get("success_metric")
+            self._success_metric_to_win = TASKS_CFG[task].get("success_metric_to_win")
+            self._success_metric_tolerance = TASKS_CFG[task].get(
+                "success_metric_tolerance"
+            )
+            print(success_metric_string)
+        else:
+            raise ValueError(
+                f"Task configuration for {task} not found in the `TASKS_CFG` dictionary in config/tasks.py."
+            )
+
+        self._task_description = task_description
+        self._feedback_subsampling = feedback_subsampling
+        self._num_processes = num_parallel_runs if env_type == "manager_based" else 1
+        self._success_metric_string = success_metric_string
+        if env_type == "manager_based":
+            self.task_success_reward_name = TASK_SUCCESS_REWARD_NAME_DICT[task]
+        else:
+            self.task_success_reward_name = None
+        print("[INFO]: Setting up the LLM Manager...")
+        logging.info("Setting up the LLM Manager...")
+        self._llm_manager = LLMManager(
+            gpt_model=gpt_model,
+            num_suggestions=1,
+            temperature=temperature,
+            env_type=env_type,
+            eureka_task=eureka_task,
+            parameters_to_tune=parameters_to_tune,
+        )
+        # set system prompt
+        self._llm_manager.append_system_prompt(self._get_system_prompt(env_type=env_type, eureka_task=eureka_task))
+        if self._num_processes > 1:
+            self._llm_manager.append_to_system_prompt(
+                MULTIPLE_SUGGESTIONS_INSTRUCTION.format(
+                    num_parallel_runs=num_parallel_runs
+                )
+                + MULTIPLE_SUGGESTIONS_EXAMPLE
+            )
+        self._resume = resume
+        print("[INFO]: Setting up the Task Manager...")
+        logging.info("Setting up the Task Manager...")
+        self._task_manager = EurekaTaskManager(
+            task=task,
+            device=device,
+            env_seed=env_seed,
+            rl_library=rl_library,
+            num_processes=self._num_processes,
+            max_training_iterations=max_training_iterations,
+            success_metric_string=success_metric_string,
+            env_type=env_type,
+            eureka_task=eureka_task,
+            parameters_to_tune=parameters_to_tune,
+            warmstart=warmstart,
+            num_envs=num_envs,
+        )
+
 
     def run(self, max_eureka_iterations: int):
         if self._task_manager.is_manager_based():
@@ -235,20 +240,25 @@ class Eureka:
         if self._task_manager._eureka_task == "reward_weight_tuning":
             self._llm_manager.append_user_prompt(smart_context_code_string)
             print("APPENDING CONTEXT CODE COMPLETE")
+            logging.info("APPENDING CONTEXT CODE COMPLETE")
 
         if self._task_manager._eureka_task == "ppo_tuning":
             ppo_algo_code_string = self.read_ppo_source_code(self._task_manager._rl_library) 
             self._llm_manager.append_user_prompt(ppo_algo_code_string)
             print("APPENDING PPO CODE COMPLETE")
+            logging.info("APPENDING PPO CODE COMPLETE")
 
         self._llm_manager.append_user_prompt(success_metric_code_string)
         print("APPENDING SUCCESS METRIC CODE COMPLETE")
+        logging.info("APPENDING SUCCESS METRIC CODE COMPLETE")
 
         if self._resume["enabled"]:
             prev_iterations_txt = self.read_prev_iterations()   
             self._llm_manager.append_user_prompt(prev_iterations_txt)
             print("RESUME == TRUE, APPENDING PREVIOUS ITERATIONS COMPLETE")
+            logging.info("RESUME == TRUE, APPENDING PREVIOUS ITERATIONS COMPLETE")
         print("APPENDING ALL COMPLETE")
+        logging.info("APPENDING ALL COMPLETE")
 
         # this part was for calling the LLM the first time
         # However, now that we first run the training with initial tuning as in the code,
@@ -280,6 +290,7 @@ class Eureka:
             for iter in range(max_eureka_iterations):
 
                 print(f"\n{'#' * 20} Running Eureka Iteration {iter} {'#' * 20} \n")
+                logging.info(f"Running Eureka Iteration {iter}")
                 # WORKAROUND
                 # For 0th iteration, we just use initial tuning from the code
                 # only one process will train, the other processes will intentionally skip training
@@ -288,29 +299,35 @@ class Eureka:
                     if self._resume["enabled"]:
                         # 0th iter but resume, so call llm
                         print("RESUME == TRUE, CALLING LLM FROM 0TH ITER")
+                        logging.info("RESUME == TRUE, CALLING LLM FROM 0TH ITER")
                         self._llm_manager.append_user_prompt(f"Based on the previous iterations, give me {self._num_processes} new suggestions.")
                         llm_outputs = self._llm_manager.call_llm()
                         print('LLM MANAGER CALLING COMPLETE')
+                        logging.info('LLM MANAGER CALLING COMPLETE')
                         gpt_weight_strings = llm_outputs["weight_strings"]
                         raw_output = llm_outputs["raw_output"]
                         self._llm_manager.append_assistant_prompt(raw_output)
                     else:
                         # 0th iter fresh start, populate gpt_weight_strings with initial tuning
                         print("FRESH START, POPULATING GPT WEIGHT STRINGS")
+                        logging.info("FRESH START, POPULATING GPT WEIGHT STRINGS")
                         SUGGESTION_PROMPT = f"Here is current configuration. Give me {self._num_processes} suggestions to start evolutionary search with, including current configuration as the first suggestion. You are encouraged to make wild guesses, since this will be the first generation in evolutioary search.\n"
                         self._llm_manager.append_user_prompt(SUGGESTION_PROMPT + self._task_manager._get_initial_tuning_as_string)
                         llm_outputs = self._llm_manager.call_llm()
                         print('LLM MANAGER CALLING COMPLETE')
+                        logging.info('LLM MANAGER CALLING COMPLETE')    
                         gpt_weight_strings = llm_outputs["weight_strings"]
                         raw_output = llm_outputs["raw_output"]
                         self._llm_manager.append_assistant_prompt(raw_output)
                 else:           
                     # Get new weights from LLM, from iter==1
                     print('LLM MANAGER CALLING START')
+                    logging.info('LLM MANAGER CALLING START')
                     # 1st iter: user_prompt is generated from 0th iter training result
                     self._llm_manager.append_user_prompt(user_prompt)
                     llm_outputs = self._llm_manager.call_llm()
                     print('LLM MANAGER CALLING COMPLETE')
+                    logging.info('LLM MANAGER CALLING COMPLETE')
                     gpt_weight_strings = llm_outputs["weight_strings"]
                     raw_output = llm_outputs["raw_output"]
                     self._llm_manager.append_assistant_prompt(raw_output)
@@ -321,8 +338,12 @@ class Eureka:
                 #     )
                 # Train the RL agent
                 print('STARTING TASK MANAGER TRAIN')
+                logging.info('STARTING TASK MANAGER TRAIN')
+                print(f"GPT WEIGHT STRINGS: \n{gpt_weight_strings}")
+                logging.info(f"GPT WEIGHT STRINGS: \n{gpt_weight_strings}")
                 results = self._task_manager.train(gpt_weight_strings)
                 print('TASK MANAGER TRAIN COMPLETE')
+                logging.info('TASK MANAGER TRAIN COMPLETE')
                 # bad fix, gpt_weight_strings is empty at iter==0 so use prev_weights_str instead
                 # Evaluate the results
                 # llm_outputs["raw_outputs"] is the raw response string
@@ -332,8 +353,9 @@ class Eureka:
                         results, best_run_results
                     )
                 )
-
+                logging.info(f"Evaluation complete")
                 self._log_iteration_results(iter, results, raw_output)
+                logging.info(f"Iteration results saved")
 
                 if (
                     best_run_results["success_metric"] is not None
@@ -355,6 +377,9 @@ class Eureka:
             print(f"An error occurred during the Eureka training loop {iter}:")
             print(e)
             traceback.print_exc()
+            logging.error(f"An error occurred during the Eureka training loop {iter}:\n{traceback.format_exc()}") 
+
+            
             # Handle the error as needed
                 
         finally:
@@ -362,6 +387,7 @@ class Eureka:
             self._log_conversation()
             # Close the task manager
             print("CLOSING TASK MANAGER")
+            logging.info("CLOSING TASK MANAGER")
             self._task_manager.close()
 
     def _get_eureka_task_feedback(
@@ -961,3 +987,21 @@ class Eureka:
                     seen.add(key)
 
         return filtered_data
+    
+
+def init_eureka_logger(log_dir: str, filename: str = "eureka_debug.log", level=logging.INFO):
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, filename)
+
+    # If logger is already set up, don't reconfigure
+    if logging.getLogger().hasHandlers():
+        return
+
+    logging.basicConfig(
+        filename=log_path,
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        filemode="w",  # overwrite on each run; change to "a" to append
+    )
+
+

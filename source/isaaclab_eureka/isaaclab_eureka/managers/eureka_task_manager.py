@@ -11,6 +11,7 @@ import types
 import ast
 import copy
 import re
+import logging
 from contextlib import nullcontext
 from datetime import datetime
 from typing import Literal
@@ -173,6 +174,7 @@ class EurekaTaskManager:
         self._context_code_string = self._context_code_queue.get()
         print("GET CONTEXT CODE STRING COMPLETE")
         print("TASK MANAGER INITIALIZATION COMPLETE")
+        logging.info(f"TASK MANAGER INITIALIZATION COMPLETE, num_processes: {self._num_processes}")
 
     @property
     def get_observations_method_as_string(self) -> str:
@@ -218,6 +220,8 @@ class EurekaTaskManager:
         if there are more strings than processes, truncate the list to the number of processes
         if there are fewer strings than processes, pad the list with empty strings
         """
+        logging.info(f"Training started with gpt reward strings:\n {get_rewards_method_as_string}")
+        
         if get_rewards_method_as_string:
 
             # trying to add pruning and exception handling for multiprocessing
@@ -240,6 +244,7 @@ class EurekaTaskManager:
             for idx, rewards_queue in enumerate(self._rewards_queues):
                 rewards_queue.put(unique_reward_methods[idx])
             print("PUSHING REWARD STRINGS TO REWARDS QUEUE COMPLETE")
+            logging.info(f"Pushed unique reward strings to rewards queue:\n {unique_reward_methods}")
 
         results = [None] * self._num_processes
         # Wait for each process to finish and collect the results
@@ -247,7 +252,7 @@ class EurekaTaskManager:
             idx, result = self._results_queue.get()
             results[idx] = result
         print("PULLING FROM RESULTS QUEUE COMPLETE")
-
+        logging.info(f"Pulled results from results queue")
         return results
 
     def _worker(self, idx: int, rewards_queue: multiprocessing.Queue):
@@ -524,8 +529,9 @@ class EurekaTaskManager:
                     "success": TrainingStatus.SKIPPED,
                 }
             # NOT SURE ABOUT THIS EMPTY_CACHE()...
-            import torch
-            torch.cuda.empty_cache()
+            # import torch
+            # print(f"PROCESS {self._idx} EMPTYING CUDA CACHE")
+            # torch.cuda.empty_cache()
             #
             result["prev_config"] = new_weights_string
             self._eureka_iter += 1

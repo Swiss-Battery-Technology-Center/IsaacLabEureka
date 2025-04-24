@@ -5,9 +5,9 @@
 import os
 import re
 
-
+import traceback
 import openai
-
+import logging
 
 class LLMManager:
     """Manager to interface with the LLM API.
@@ -60,6 +60,7 @@ class LLMManager:
         self._total_response_tokens=0
         self._input_token_price = 0.27
         self._output_token_price = 1.10
+        logging.info(f"LLMManager initialized with model: {gpt_model}, temperature: {temperature}")
         
     # appends a string to an already existing system prompt
     def append_to_system_prompt(self, additioal_prompt: str):
@@ -87,26 +88,42 @@ class LLMManager:
         self._prompts = []
 
     # make sure you set the prompts correctly before calling this function
-    def call_llm(self) -> dict:
-        # add exception handling later, for the case when llm api fails
-        try:
-            responses = self._client.chat.completions.create(
-                model=self._gpt_model,
-                messages=self._prompts,
-                temperature=self._temperature,
-                n=self._num_suggestions,
-            )
-            if responses.choices[0].finish_reason == 'error':
-                raise RuntimeError("responses.choices[0].finish_reason == 'error'")
-        except Exception as e:
-            raise RuntimeError(f"An error occurred while prompting the LLM: {e}") from e
-        # llm returns a single response that contains multiple weight strings
-        raw_output = responses.choices[0].message.content
-        weights_strings = self.extract_multiple_weights_from_response(raw_output) 
-        self._total_tokens += responses.usage.total_tokens
-        self._total_query_tokens += responses.usage.prompt_tokens
-        self._total_response_tokens += responses.usage.completion_tokens
-        return {"weight_strings": weights_strings, "raw_output": raw_output}
+    def call_llm(self, max_retries=3) -> dict:
+        logging.info(f"Calling LLM")
+        attempt = 0
+        while attempt < max_retries:
+            try:
+                responses = self._client.chat.completions.create(
+                    model=self._gpt_model,
+                    messages=self._prompts,
+                    temperature=self._temperature,
+                    n=self._num_suggestions,
+                )
+                if responses.choices[0].finish_reason == 'error':
+                    logging.error("LLM call failed with error finish reason")
+                    raise RuntimeError("responses.choices[0].finish_reason == 'error'")
+                raw_output = responses.choices[0].message.content
+                print(f"Attempt {attempt}, RAW OUTPUT: {raw_output}")
+                weights_strings = self.extract_multiple_weights_from_response(raw_output)
+                
+                if weights_strings and any(w.strip() for w in weights_strings):
+                    # Success!
+                    self._total_tokens += responses.usage.total_tokens
+                    self._total_query_tokens += responses.usage.prompt_tokens
+                    self._total_response_tokens += responses.usage.completion_tokens
+                    return {"weight_strings": weights_strings, "raw_output": raw_output}
+                else:
+                    print(f"[WARNING] Extracted WEIGHTS_STRINGS is an EMPTY LIST at attempt {attempt+1}. Retrying...")
+                    logging.warning(f"Extracted WEIGHTS_STRINGS is an EMPTY LIST at attempt {attempt+1}. Retrying...")
+                    attempt += 1
+            except Exception as e:
+                print(f"[ERROR] LLM call failed on attempt {attempt+1}: {e}")
+                traceback.print_exc()
+                logging.error(f"LLM call failed on attempt {attempt+1}: {traceback.format_exc()}")
+                attempt += 1
+        logging.error("LLM failed to provide valid weight strings after multiple attempts.")
+        raise RuntimeError("LLM failed to provide valid weight strings after multiple attempts.")
+
 
     def extract_code_from_response(self, response: str) -> str:
         """Extract the code component from the LLM response

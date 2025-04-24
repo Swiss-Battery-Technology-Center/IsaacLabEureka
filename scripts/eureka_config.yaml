@@ -20,12 +20,12 @@ temperature: 1
 # IsaacLab related arguments
 num_envs: 512 # choose appropriate value for task, 1024 for unscrew/lift
 
-max_training_iterations: 100 # RL learning iterations, 800 for lift, 1500 for unscrew
+max_training_iterations: 1200 # RL learning iterations, 800 for lift, 1500 for unscrew
 feedback_subsampling: 10 # adaptive to max learning iterations, 10 will sample 10 times during a full RL training, 20 will sample 20 times
 
 env_type: "manager_based" # "manager_based" or "direct"
 
-eureka_task: "ppo_tuning" # "ppo_tuning" or "reward_weight_tuning"
+eureka_task: "reward_weight_tuning" # "ppo_tuning" or "reward_weight_tuning"
 warmstart: False # True if using oracle tuning found by experts at SBTC as initial weights
 
 # "rsl_rl" , "rl_games",  "skrl" supported for "reward_weight_tuning", 
@@ -51,10 +51,10 @@ rl_library: "rsl_rl"
 
 # for rsl_rl
 
-parameters_to_tune: 
-  - "algorithm.learning_rate"
-  - "algorithm.entropy_coef"
-  - "algorithm.desired_kl"
-  - "algorithm.clip_param"
+# parameters_to_tune: 
+#   - "algorithm.learning_rate"
+#   - "algorithm.entropy_coef"
+#   - "algorithm.desired_kl"
+#   - "algorithm.clip_param"
   # - "algorithm.use_clipped_value_loss"
   # - "policy.init_noise_std"
