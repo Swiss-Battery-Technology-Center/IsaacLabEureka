@@ -96,8 +96,10 @@ class LLMManager:
                 temperature=self._temperature,
                 n=self._num_suggestions,
             )
+            if responses.choices[0].finish_reason == 'error':
+                raise RuntimeError("responses.choices[0].finish_reason == 'error'")
         except Exception as e:
-            raise RuntimeError("An error occurred while prompting the LLM") from e
+            raise RuntimeError(f"An error occurred while prompting the LLM: {e}") from e
         # llm returns a single response that contains multiple weight strings
         raw_output = responses.choices[0].message.content
         weights_strings = self.extract_multiple_weights_from_response(raw_output) 

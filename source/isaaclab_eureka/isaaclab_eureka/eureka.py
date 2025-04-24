@@ -283,38 +283,37 @@ class Eureka:
                 # WORKAROUND
                 # For 0th iteration, we just use initial tuning from the code
                 # only one process will train, the other processes will intentionally skip training
+                # save raw output as assistant prompt ASAP, otherwise it might get lost and not save on eureka_conversation.txt
                 if iter == 0:
                     if self._resume["enabled"]:
                         # 0th iter but resume, so call llm
                         print("RESUME == TRUE, CALLING LLM FROM 0TH ITER")
-                        if self._task_manager._eureka_task == "reward_weight_tuning":
-                            self._llm_manager.append_user_prompt(MANAGER_BASED_WEIGHT_TUNING_INITIAL_PROMPT)
-                        if self._task_manager._eureka_task == "ppo_tuning":
-                            self._llm_manager.append_user_prompt(MANAGER_BASED_PPO_TUNING_INITIAL_PROMPT)
+                        self._llm_manager.append_user_prompt(f"Based on the previous iterations, give me {self._num_processes} new suggestions.")
                         llm_outputs = self._llm_manager.call_llm()
                         print('LLM MANAGER CALLING COMPLETE')
                         gpt_weight_strings = llm_outputs["weight_strings"]
                         raw_output = llm_outputs["raw_output"]
+                        self._llm_manager.append_assistant_prompt(raw_output)
                     else:
                         # 0th iter fresh start, populate gpt_weight_strings with initial tuning
-                        print()
-                        for i in range(self._num_processes):
-                            gpt_weight_strings[i] = ""
-                        gpt_weight_strings[0] = self._task_manager._get_initial_tuning_as_string
+                        print("FRESH START, POPULATING GPT WEIGHT STRINGS")
+                        SUGGESTION_PROMPT = f"Here is current configuration. Give me {self._num_processes} suggestions to start evolutionary search with, including current configuration as the first suggestion. You are encouraged to make wild guesses, since this will be the first generation in evolutioary search.\n"
+                        self._llm_manager.append_user_prompt(SUGGESTION_PROMPT + self._task_manager._get_initial_tuning_as_string)
+                        llm_outputs = self._llm_manager.call_llm()
+                        print('LLM MANAGER CALLING COMPLETE')
+                        gpt_weight_strings = llm_outputs["weight_strings"]
+                        raw_output = llm_outputs["raw_output"]
+                        self._llm_manager.append_assistant_prompt(raw_output)
                 else:           
                     # Get new weights from LLM, from iter==1
                     print('LLM MANAGER CALLING START')
-                    if raw_output is not None:
-                        # 0th iter: doesn't even call llm
-                        # 1st iter: calls llm but only with user prompt
-                        # 2nd iter ~ : assistant prompt is available
-                        self._llm_manager.append_assistant_prompt(raw_output)
                     # 1st iter: user_prompt is generated from 0th iter training result
                     self._llm_manager.append_user_prompt(user_prompt)
                     llm_outputs = self._llm_manager.call_llm()
                     print('LLM MANAGER CALLING COMPLETE')
                     gpt_weight_strings = llm_outputs["weight_strings"]
                     raw_output = llm_outputs["raw_output"]
+                    self._llm_manager.append_assistant_prompt(raw_output)
                 # Do I need this part?
                 # for idx, gpt_reward_method_string in enumerate(gpt_weight_strings):
                 #     self._tensorboard_writer.add_text(
@@ -349,7 +348,9 @@ class Eureka:
                     break
 
                 
-                user_prompt = results[best_run_idx]["user_prompt"]
+                user_prompt = (results[best_run_idx]["user_prompt"] +
+                                MULTIPLE_SUGGESTIONS_INSTRUCTION.format(num_parallel_runs=self._num_processes)
+                                + MULTIPLE_SUGGESTIONS_EXAMPLE)
         except Exception as e:
             print(f"An error occurred during the Eureka training loop {iter}:")
             print(e)
@@ -721,7 +722,7 @@ class Eureka:
                         WEIGHT_TUNING_TASK_SUCCESS_PRE_FEEDBACK_PROMPT.format(
                             feedback_subsampling=self._feedback_subsampling
                         )
-                        + result["prev_config"] + "\n\n"
+                        + "Using this configuration: \n" +result["prev_config"] + "\n\n"
                         + eureka_task_feedback
                         + WEIGHT_TUNING_TASK_SUCCESS_POST_FEEDBACK_PROMPT
                     )

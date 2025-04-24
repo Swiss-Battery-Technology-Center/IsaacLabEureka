@@ -429,6 +429,7 @@ class EurekaTaskManager:
         self._idx = idx
         self._has_sent_initial_tuning = False
         self._eureka_iter = 0
+        print(f"[INFO] PROCESS {self._idx} started with PID: {os.getpid()}")
         while not self.termination_event.is_set():
             if not hasattr(self, "_env"):
                 self._create_environment()
@@ -484,7 +485,9 @@ class EurekaTaskManager:
                                 )
                             print('SELF PPO PARAM STRING COMPLETE')
                         print(f"PROCESS {self._idx} STARTING RUN TRAINING")
+                        log_gpu_usage(os.getpid(), self._idx)
                         self._run_training()
+                        log_gpu_usage(os.getpid(), self._idx)
                         print(f"PROCESS {self._idx} RUN TRAINING COMPLETE")
                         # this line will not run if training fails, so run it in except block as well
                         print(f"PROCESS {self._idx} RESETTING ALL ENVS")
@@ -520,6 +523,10 @@ class EurekaTaskManager:
                 result = {
                     "success": TrainingStatus.SKIPPED,
                 }
+            # NOT SURE ABOUT THIS EMPTY_CACHE()...
+            import torch
+            torch.cuda.empty_cache()
+            #
             result["prev_config"] = new_weights_string
             self._eureka_iter += 1
             self._results_queue.put((self._idx, result))
@@ -891,3 +898,17 @@ class EurekaTaskManager:
                 all_text += f"\n=== {name} ===\n{src}\n"
         intro = "Here is environment source code\n\n"
         return intro + all_text
+
+
+import pynvml
+
+def log_gpu_usage(pid: int, idx: int):
+    pynvml.nvmlInit()
+    handle = pynvml.nvmlDeviceGetHandleByIndex(0)  # or loop for all GPUs
+    processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+
+    for proc in processes:
+        if proc.pid == pid:
+            used_mem = proc.usedGpuMemory / 1024 / 1024  # MB
+            print(f"[GPU LOG] Process {idx} (PID {pid}) using {used_mem:.2f} MB GPU memory")
+    pynvml.nvmlShutdown()

@@ -27,7 +27,7 @@ Some helpful tips for writing the reward function code:
 """
 
 MANAGER_BASED_WEIGHT_TUNING_FORMATTING_INSTRUCTIONS = """
-Your new configuraiton string should comply exactly with the structure of the previous configuration, which will be given in user prompts.
+Your new configuraiton string should comply exactly with the structure of the previous configuration.
 It will generally look like:
     {'reward.term_name.weight': value_1, 'curriculum.term_name.param_name': value_2, ...}
 I will use regex pattern of the above structure to extract the keys and values from your response. 
@@ -44,7 +44,7 @@ If training is not going well, you are encouraged to make wild guesses.
 """
 
 MANAGER_BASED_PPO_TUNING_FORMATTING_INSTRUCTIONS = """
-Your ppo hyperparameter tuning string should comply exactly with the previous tuning configuration, which will be given in user prompts.
+Your ppo hyperparameter tuning string should comply exactly with the previous tuning configuration.
     {'param_name_1': value_1, 'param_name_2': value_2, ...}
 I will use regex pattern of the above structure to extract the ppo hyperparameters and suggested tuning values from your response.
 param_name is a string and must be enclosed by a single quote.
@@ -54,7 +54,7 @@ Note, if you think value of a certain parameter was good in the previous run, yo
 """
 
 MULTIPLE_SUGGESTIONS_INSTRUCTION = """
-I want to do evolutionary search for the hyperparameters, so please provide {num_parallel_runs} different suggestions for hyperparameter tuning.
+I want to do evolutionary search for the configurations, so please provide {num_parallel_runs} different suggestions for configurations tuning.
 """
 MULTIPLE_SUGGESTIONS_EXAMPLE ="""
 For ease of extraction, your respose should look like,
@@ -139,11 +139,11 @@ Please analyze each existing reward component in the suggested manner above firs
 """ + DIRECT_WORKFLOW_REWARD_FORMATTING_INSTRUCTIONS
 
 WEIGHT_TUNING_TASK_SUCCESS_POST_FEEDBACK_PROMPT = """
-Please carefully analyze the policy feedback and provide a new, improved weights for reward terms that can better solve the task. 
+Please carefully analyze the policy feedback. Based on the previous configuration, provide a new, improved configuration that can better solve the task. 
 """ + MANAGER_BASED_WEIGHT_TUNING_FORMATTING_INSTRUCTIONS
 
 PPO_TUNING_TASK_SUCCESS_POST_FEEDBACK_PROMPT = """
-Please carefully analyze the policy feedback and provide a new, improved tuning of ppo hyperparameters so that the agent will learn more effectively. 
+Please carefully analyze the policy feedback. Based on the previous configuration, provide a new, improved set of ppo hyperparameters so that the agent will learn more effectively. 
 """ + MANAGER_BASED_PPO_TUNING_FORMATTING_INSTRUCTIONS
 
 DIRECT_WORKFLOW_TASK_PROMPT = """
