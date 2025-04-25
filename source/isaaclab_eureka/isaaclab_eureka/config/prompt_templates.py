@@ -67,7 +67,8 @@ Suggestion 1
 Suggestion N
 {'param_name_1': value_1, 'param_name_2': value_2, ...}
 
-After which you should add your analysis of the previous training run and explain why you think the new suggestions are better.
+After which you should add your analysis of the previous training run and explain why you think the new suggestions are better. 
+Utilize your prior knowledge of this isaaclab environment configuration / success metric / ppo algorithm from the beginning of this conversation.
 """
 
 DIRECT_WORKFLOW_INITIAL_PROMPT = """
@@ -139,11 +140,11 @@ Please analyze each existing reward component in the suggested manner above firs
 """ + DIRECT_WORKFLOW_REWARD_FORMATTING_INSTRUCTIONS
 
 WEIGHT_TUNING_TASK_SUCCESS_POST_FEEDBACK_PROMPT = """
-Please carefully analyze the policy feedback. Based on the previous configuration, provide a new, improved configuration that can better solve the task. 
+Leverage your prior knowledge of the environment, reward terms, curriculum terms, success_metric and auxillary fields. Please carefully analyze the policy feedback. Based on the previous configuration, provide a new, improved configuration that can better solve the task. 
 """ + MANAGER_BASED_WEIGHT_TUNING_FORMATTING_INSTRUCTIONS
 
 PPO_TUNING_TASK_SUCCESS_POST_FEEDBACK_PROMPT = """
-Please carefully analyze the policy feedback. Based on the previous configuration, provide a new, improved set of ppo hyperparameters so that the agent will learn more effectively. 
+Leverage your prior knowledge of the library-specific PPO implementation, success_metric and auxillary fields. Please carefully analyze the policy feedback. Based on the previous configuration, provide a new, improved set of ppo hyperparameters so that the agent will learn more effectively. 
 """ + MANAGER_BASED_PPO_TUNING_FORMATTING_INSTRUCTIONS
 
 DIRECT_WORKFLOW_TASK_PROMPT = """
@@ -161,4 +162,51 @@ The desired task score is: {success_metric_to_win}
 MANAGER_BASED_PPO_TUNING_TASK_PROMPT = """
 Find a good tuning of ppo hyperparameters for the task: {task_description}
 The desired task score is: {success_metric_to_win}
+"""
+
+CONTEXT_CODE_SUMMARIZATION_PROMPT = """
+You are an expert in reinforcement learning, robotics, and IsaacLab.
+Please read the following IsaacLab environment source code and summarize the key components.
+Understand how different components work together to provide dense rewards to facilitate learning of the ultimate task, and explain it in your summary.
+For example, there might be easy reward terms to guide the agent towards ultimate success. There might be curriculum terms that gradually increase the difficulty of the task.
+Your summary will be used as prior knowledge for tuning reward weights, curriculum schedules, etc to facilitate learning. Make your summary as rich and detailed as possible.
+If you think certain codes are not relevant to learning, such as robot data or visualization, do not include them in your summary.
+
+Your summary should include:
+- Each reward term, how it is computed and its physical meaning (plus its numerical range before weight is multiplied if you deem it relevant)
+- Each curriculum term, parameters, terms that are influenced by this curriculum and its physical meaning
+- Components relevant to domain randomization
+- The overarching structure of the environment that is relevant to learning
+- how different reward terms provide dense rewards to facilitate learning of the ultimate task  
+- how curriculum terms change other terms to facilitate learning of the ultimate task
+
+Additionally, include anything else you think is important for understanding and tuning the environment.
+
+Do not include weight of each reward term in your summary, because the weights will be tuned multiple times. It is meaningless to remember the initial weights.
+"""
+
+SUCCESS_METRIC_SUMMARIZATION_PROMPT = """
+You are a robotics and reinforcement learning expert analyzing a custom success metric function used for RL training.
+
+Please read the Python source code for the success metric function below, understand and provide a summary.
+
+Your summary should include:
+- The physical meaning of the success_metric and how it is computed
+- Physical meaning of auxillary fields in the returned dictionary and how they relate to the success metric
+
+Note that after each training, history of success_metric and auxillary_field values will be provided to you to analyse training progress.
+Provide a summary in such a way that it will be helpful for you to analyze the training progress and suggest better reward weights, curriculum schedules, etc to facilitate learning. Make your summary as rich and detailed as possible.
+
+"""
+
+PPO_SUMMARIZATION_PROMPT = """
+You are a reinforcement learning expert analyzing a specific implementation of PPO algorithm.
+
+Please read the Python source code for the PPO algorithm below, understand and provide a summary.   
+Your summary should include:
+- General principle of the PPO algorithm and how it is implemented with this specific code
+- The physical meaning of each hyperparameter and how it affects the learning curve
+- Anything unique to this library-specific implementation of PPO, unique features, parameters, etc
+
+This summary will be later used to tune the hyperparameters of this PPO algorithm. Make your summary as rich and detailed as possible.
 """

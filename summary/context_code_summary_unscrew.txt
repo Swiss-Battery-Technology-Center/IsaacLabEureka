@@ -1,0 +1,95 @@
+### Key Components Summary for SBTC Unscrew Environment
+
+---
+
+#### **Reward Terms**
+1. **EE Verticality**  
+   - *Computation*: Measures alignment between end-effector's Z-axis and target vertical axis (Y-up quaternion).  
+   - *Range*: `[0, 1]` (1 = perfect alignment).  
+   - *Purpose*: Encourages proper screwdriver orientation for engagement.
+
+2. **Yaw Alignment**  
+   - *Computation*: Compares yaw angle between EE and object, normalized for hexagonal screws (6 repeats for 60° symmetry).  
+   - *Range*: `[0, 1]` (1 = aligned).  
+   - *Purpose*: Ensures rotational alignment for screw insertion.
+
+3. **Position Similarity (Coarse/Medium/Fine)**  
+   - *Computation*: Squash function rewards proximity between EE and object.  
+     - Coarse (`sigma=5`), Medium (`sigma=50`), Fine (`sigma=100`).  
+   - *Range*: `[0, 1]` (1 = exact match).  
+   - *Purpose*: Guides EE toward the screw at increasing precision levels.
+
+4. **Screw Engaged**  
+   - *Computation*: Tanh-based step function triggered when EE is within `0.002m` of the target.  
+   - *Range*: `[0, 1]` (1 = fully engaged).  
+   - *Purpose*: Signals successful screw contact.
+
+5. **Screw Contact**  
+   - *Computation*: Detects contact forces > `2.5N` between EE and screw.  
+   - *Range*: Binary (0/1).  
+   - *Purpose*: Rewards maintaining contact during unscrewing.
+
+6. **Table Contact Penalty**  
+   - *Computation*: Penalizes EE contact with the table.  
+   - *Range*: Binary (0/1).  
+   - *Purpose*: Prevents collisions with the environment.
+
+7. **Action Rate Penalty**  
+   - *Computation*: L2 penalty on action changes between steps.  
+   - *Purpose*: Encourages smooth control.
+
+8. **Joint Velocity Penalty**  
+   - *Computation*: L2 penalty on joint velocities.  
+   - *Purpose*: Prevents aggressive movements.
+
+---
+
+#### **Curriculum Terms**
+1. **Initial EE Pose Randomization**  
+   - *Parameters*:  
+     - Initial offset: `(0.0, 0.0, 0.05m)` → `(0.0, 0.0, 0.21m)` (Z-axis).  
+     - Position noise: `±0.04m` → `±0.2m`.  
+   - *Trigger*: Based on `screw_engaged` reward performance.  
+   - *Effect*: Increases initial EE pose difficulty as agent improves.
+
+2. **Object Offset Reduction**  
+   - *Parameters*:  
+     - Target offset: `(0.0, 0.0, 0.006m)` → `(0.0, 0.0, 0.0m)`.  
+   - *Affected Terms*: All position similarity rewards and `screw_engaged`.  
+   - *Effect*: Shifts target to exact screw position as agent learns.
+
+3. **Joint Effort Deadzone Increase**  
+   - *Parameters*:  
+     - Deadzone range: `[0.0, 0.1]` → `[0.0, 0.5]`.  
+   - *Effect*: Forces agent to overcome larger controller deadzones, improving robustness.
+
+---
+
+#### **Domain Randomization**
+- **Object Pose**: Randomized on reset (`x/y/z: ±0.1m`, `yaw: ±π/6`).  
+- **PD Gains**: Randomized (`p: [50, 150]`, `d: [0.25, 1.75]`).  
+- **Joint Effort Deadzones**: Randomized during training.  
+
+---
+
+#### **Environment Structure**
+- **Observations**:  
+  - EE position/velocity, object position/yaw, contact forces, and action history.  
+  - Critic gets filtered contact forces for stability.  
+- **Actions**: Operational Space Control (OSC) for 6-DoF EE motion.  
+- **Termination**: Only on time-out (`5s` episode).  
+
+---
+
+#### **Reward Design Strategy**
+- **Dense Guidance**: Coarse → medium → fine position rewards guide the EE to the screw.  
+- **Alignment Phases**: Verticality and yaw alignment ensure proper screwdriver orientation.  
+- **Contact Management**: `screw_contact` and `table_contact` balance engagement and collision avoidance.  
+- **Curriculum Progression**: Initial randomization and target offsets adapt to agent capability, ensuring gradual skill acquisition.
+
+---
+
+#### **Tuning Considerations**
+- **Reward Balance**: Ensure position/yaw alignment terms dominate early training, with screw engagement becoming critical later.  
+- **Curriculum Timing**: Adjust step thresholds (`num_steps_start/end`) based on learning speed.  
+- **Domain Randomization Ranges**: Wider ranges improve sim-to-real transfer but may slow training.

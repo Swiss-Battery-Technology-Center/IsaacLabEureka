@@ -33,6 +33,9 @@ from isaaclab_eureka.config import (
     PPO_TUNING_TASK_FORMAT_ERROR_FEEDBACK_PROMPT,
     PPO_TUNING_TASK_SUCCESS_PRE_FEEDBACK_PROMPT,
     PPO_TUNING_TASK_SUCCESS_POST_FEEDBACK_PROMPT,
+    CONTEXT_CODE_SUMMARIZATION_PROMPT, 
+    SUCCESS_METRIC_SUMMARIZATION_PROMPT, 
+    PPO_SUMMARIZATION_PROMPT
 )
 from isaaclab_eureka.managers import EurekaTaskManager, LLMManager
 from isaaclab_eureka.utils import load_tensorboard_logs, TrainingStatus
@@ -125,6 +128,7 @@ class Eureka:
             self.task_success_reward_name = TASK_SUCCESS_REWARD_NAME_DICT[task]
         else:
             self.task_success_reward_name = None
+        self._resume = resume
         print("[INFO]: Setting up the LLM Manager...")
         logging.info("Setting up the LLM Manager...")
         self._llm_manager = LLMManager(
@@ -135,16 +139,6 @@ class Eureka:
             eureka_task=eureka_task,
             parameters_to_tune=parameters_to_tune,
         )
-        # set system prompt
-        self._llm_manager.append_system_prompt(self._get_system_prompt(env_type=env_type, eureka_task=eureka_task))
-        if self._num_processes > 1:
-            self._llm_manager.append_to_system_prompt(
-                MULTIPLE_SUGGESTIONS_INSTRUCTION.format(
-                    num_parallel_runs=num_parallel_runs
-                )
-                + MULTIPLE_SUGGESTIONS_EXAMPLE
-            )
-        self._resume = resume
         print("[INFO]: Setting up the Task Manager...")
         logging.info("Setting up the Task Manager...")
         self._task_manager = EurekaTaskManager(
@@ -233,74 +227,82 @@ class Eureka:
         Args:
             max_eureka_iterations: The maximum number of Eureka iterations to run.
         """
-        #  context_code_string = self.read_env_source_code_brute(self._task_manager._task)
-        smart_context_code_string = self._task_manager._context_code_string
-        success_metric_code_string = self.read_success_metric_code()
+        # override flag for regenerating summaries
+        # later migrate to eureka_config.yaml
+        override = True
+
+        self._llm_manager.clear_prompts()
+        self._llm_manager.append_system_prompt(self._get_system_prompt(env_type=self._task_manager._env_type, eureka_task=self._task_manager._eureka_task))
+        if self._num_processes > 1:
+            self._llm_manager.append_to_system_prompt(
+                MULTIPLE_SUGGESTIONS_INSTRUCTION.format(
+                    num_parallel_runs=self._num_processes
+                )
+                + MULTIPLE_SUGGESTIONS_EXAMPLE
+            )
+        print("SETTING SYSTEM PROMPT COMPLETE")
+        logging.info("SETTING SYSTEM PROMPT COMPLETE")
+
+        #  get summary and append to assistant prompt
 
         if self._task_manager._eureka_task == "reward_weight_tuning":
-            self._llm_manager.append_user_prompt(smart_context_code_string)
-            print("APPENDING CONTEXT CODE COMPLETE")
-            logging.info("APPENDING CONTEXT CODE COMPLETE")
+            smart_context_code_string = self._task_manager._context_code_string
+            context_code_summary = self._llm_manager.get_or_generate_summary("context_code", 
+                                                                         self._task_manager._rl_task_type, 
+                                                                         CONTEXT_CODE_SUMMARIZATION_PROMPT,
+                                                                         smart_context_code_string,
+                                                                         EUREKA_ROOT_DIR,
+                                                                         override=override)
+            self._llm_manager.append_assistant_prompt(context_code_summary)
+            print("CONTEXT CODE SUMMARY TO ASSISTANT PROMPT COMPLETE")
+            logging.info("CONTEXT CODE SUMMARY TO ASSISTANT PROMPT COMPLETE")
 
         if self._task_manager._eureka_task == "ppo_tuning":
-            ppo_algo_code_string = self.read_ppo_source_code(self._task_manager._rl_library) 
-            self._llm_manager.append_user_prompt(ppo_algo_code_string)
-            print("APPENDING PPO CODE COMPLETE")
-            logging.info("APPENDING PPO CODE COMPLETE")
+            ppo_code_string = self.read_ppo_source_code(self._task_manager._rl_library) 
+            ppo_code_summary = self._llm_manager.get_or_generate_summary("ppo_code", 
+                                                                         self._task_manager._rl_library, 
+                                                                         PPO_SUMMARIZATION_PROMPT,
+                                                                         ppo_code_string,
+                                                                         EUREKA_ROOT_DIR,
+                                                                         override=override)
+            self._llm_manager.append_assistant_prompt(ppo_code_summary)
+            print("PPO SUMMARY TO ASSISTANT PROMPT COMPLETE")
+            logging.info("PPO SUMMARY TO ASSISTANT PROMPT COMPLETE")
+        
+        success_metric_code_string = self.read_success_metric_code()
+        success_metric_code_summary = self._llm_manager.get_or_generate_summary("success_metric_code", 
+                                                                         self._task_manager._rl_task_type, 
+                                                                         SUCCESS_METRIC_SUMMARIZATION_PROMPT,
+                                                                         success_metric_code_string,
+                                                                         EUREKA_ROOT_DIR,
+                                                                         override=override)
+        self._llm_manager.append_assistant_prompt(success_metric_code_summary)
+        print("SUCCESS METRIC CODE SUMMARY TO ASSISTANT PROMPT COMPLETE")
+        logging.info("SUCCESS METRIC CODE SUMMARY TO ASSISTANT PROMPT COMPLETE")
 
-        self._llm_manager.append_user_prompt(success_metric_code_string)
-        print("APPENDING SUCCESS METRIC CODE COMPLETE")
-        logging.info("APPENDING SUCCESS METRIC CODE COMPLETE")
-
+        # if resume
         if self._resume["enabled"]:
             prev_iterations_txt = self.read_prev_iterations()   
             self._llm_manager.append_user_prompt(prev_iterations_txt)
             print("RESUME == TRUE, APPENDING PREVIOUS ITERATIONS COMPLETE")
             logging.info("RESUME == TRUE, APPENDING PREVIOUS ITERATIONS COMPLETE")
-        print("APPENDING ALL COMPLETE")
-        logging.info("APPENDING ALL COMPLETE")
 
-        # this part was for calling the LLM the first time
-        # However, now that we first run the training with initial tuning as in the code,
-        # and then call the LLM with training results, we don't need this anymore
-
-        # if self._task_manager._eureka_task == "ppo_tuning":
-        #     user_prompt = MANAGER_BASED_PPO_TUNING_TASK_PROMPT.format(
-        #         task_description=self._task_description,
-        #         success_metric_to_win=self._success_metric_to_win,
-        #     )
-        #     user_prompt += " Here is the initial configuration of ppo parameters\n"
-        # else:
-        #     user_prompt = MANAGER_BASED_WEIGHT_TUNING_TASK_PROMPT.format(
-        #         task_description=self._task_description,
-        #         success_metric_to_win=self._success_metric_to_win,
-        #     )
-        #     user_prompt += " Here is the initial configuration of reward term weights\n"
-        # if self._task_manager._get_initial_tuning_as_string is not None:
-        #     user_prompt += self._task_manager._get_initial_tuning_as_string
-        # user_prompt += context_code_string     
-        #  assistant_prompt = self._task_manager._get_initial_tuning_as_string
-
-        # The best run across all iterations
         best_run_results = {"success_metric": None}
         gpt_weight_strings = [None]*self._num_processes
         llm_outputs = None
         raw_output = None
+
         try: 
             for iter in range(max_eureka_iterations):
 
                 print(f"\n{'#' * 20} Running Eureka Iteration {iter} {'#' * 20} \n")
                 logging.info(f"Running Eureka Iteration {iter}")
-                # WORKAROUND
-                # For 0th iteration, we just use initial tuning from the code
-                # only one process will train, the other processes will intentionally skip training
-                # save raw output as assistant prompt ASAP, otherwise it might get lost and not save on eureka_conversation.txt
                 if iter == 0:
                     if self._resume["enabled"]:
-                        # 0th iter but resume, so call llm
+                        # 0th iter with resume, llm gives suggestions based on previous iterations
                         print("RESUME == TRUE, CALLING LLM FROM 0TH ITER")
                         logging.info("RESUME == TRUE, CALLING LLM FROM 0TH ITER")
-                        self._llm_manager.append_user_prompt(f"Based on the previous iterations, give me {self._num_processes} new suggestions.")
+                        self._llm_manager.append_user_prompt(f"Based on the previous iterations, give me {self._num_processes} new suggestion. You are encouraged to make wild guesses, since this will be the first generation in evolutioary search.\n")
                         llm_outputs = self._llm_manager.call_llm()
                         print('LLM MANAGER CALLING COMPLETE')
                         logging.info('LLM MANAGER CALLING COMPLETE')
@@ -308,10 +310,10 @@ class Eureka:
                         raw_output = llm_outputs["raw_output"]
                         self._llm_manager.append_assistant_prompt(raw_output)
                     else:
-                        # 0th iter fresh start, populate gpt_weight_strings with initial tuning
+                        # 0th iter fresh start, llm gives random suggestions
                         print("FRESH START, POPULATING GPT WEIGHT STRINGS")
                         logging.info("FRESH START, POPULATING GPT WEIGHT STRINGS")
-                        SUGGESTION_PROMPT = f"Here is current configuration. Give me {self._num_processes} suggestions to start evolutionary search with, including current configuration as the first suggestion. You are encouraged to make wild guesses, since this will be the first generation in evolutioary search.\n"
+                        SUGGESTION_PROMPT = f"Here is current configuration. Give me {self._num_processes} suggestion to start evolutionary search with, including current configuration as the first suggestion. You are encouraged to make wild guesses, since this will be the first generation in evolutioary search.\n"
                         self._llm_manager.append_user_prompt(SUGGESTION_PROMPT + self._task_manager._get_initial_tuning_as_string)
                         llm_outputs = self._llm_manager.call_llm()
                         print('LLM MANAGER CALLING COMPLETE')
@@ -320,10 +322,10 @@ class Eureka:
                         raw_output = llm_outputs["raw_output"]
                         self._llm_manager.append_assistant_prompt(raw_output)
                 else:           
-                    # Get new weights from LLM, from iter==1
+                    # llm gives suggestions based on previous iterations
                     print('LLM MANAGER CALLING START')
                     logging.info('LLM MANAGER CALLING START')
-                    # 1st iter: user_prompt is generated from 0th iter training result
+
                     self._llm_manager.append_user_prompt(user_prompt)
                     llm_outputs = self._llm_manager.call_llm()
                     print('LLM MANAGER CALLING COMPLETE')
@@ -372,7 +374,7 @@ class Eureka:
                 
                 user_prompt = (results[best_run_idx]["user_prompt"] +
                                 MULTIPLE_SUGGESTIONS_INSTRUCTION.format(num_parallel_runs=self._num_processes)
-                                + MULTIPLE_SUGGESTIONS_EXAMPLE)
+                                + MULTIPLE_SUGGESTIONS_EXAMPLE if self._num_processes > 1 else results[best_run_idx]["user_prompt"])
         except Exception as e:
             print(f"An error occurred during the Eureka training loop {iter}:")
             print(e)

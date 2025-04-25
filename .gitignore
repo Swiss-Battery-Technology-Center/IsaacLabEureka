@@ -1,3 +1,5 @@
 **/__pycache__/
 *.egg-info
 logs/
+source/isaaclab_eureka/isaaclab_eureka/test/test_outputs/*
+source/isaaclab_eureka/isaaclab_eureka/dev/texts/*

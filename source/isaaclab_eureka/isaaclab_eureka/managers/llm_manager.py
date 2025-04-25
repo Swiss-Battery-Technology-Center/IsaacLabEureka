@@ -99,13 +99,16 @@ class LLMManager:
                     temperature=self._temperature,
                     n=self._num_suggestions,
                 )
-                if responses.choices[0].finish_reason == 'error':
-                    logging.error("LLM call failed with error finish reason")
-                    raise RuntimeError("responses.choices[0].finish_reason == 'error'")
+
                 raw_output = responses.choices[0].message.content
-                print(f"Attempt {attempt}, RAW OUTPUT: {raw_output}")
+
+                # this catches raw_output that is empty string or None
+                if not raw_output:
+                    logging.error(f"LLM call failed with empty response, finish reason: {responses.choices[0].finish_reason}")
+                    raise RuntimeError("LLM call failed with empty response")
+
                 weights_strings = self.extract_multiple_weights_from_response(raw_output)
-                
+
                 if weights_strings and any(w.strip() for w in weights_strings):
                     # Success!
                     self._total_tokens += responses.usage.total_tokens
@@ -113,8 +116,8 @@ class LLMManager:
                     self._total_response_tokens += responses.usage.completion_tokens
                     return {"weight_strings": weights_strings, "raw_output": raw_output}
                 else:
-                    print(f"[WARNING] Extracted WEIGHTS_STRINGS is an EMPTY LIST at attempt {attempt+1}. Retrying...")
-                    logging.warning(f"Extracted WEIGHTS_STRINGS is an EMPTY LIST at attempt {attempt+1}. Retrying...")
+                    print(f"response was okay but failed to extract weights at {attempt+1}. Retrying...")
+                    logging.error(f"LLM response was non empty but failed to extract weights at attempt {attempt+1}.\n raw_output: \n{raw_output}\n Retrying...")
                     attempt += 1
             except Exception as e:
                 print(f"[ERROR] LLM call failed on attempt {attempt+1}: {e}")
@@ -123,6 +126,76 @@ class LLMManager:
                 attempt += 1
         logging.error("LLM failed to provide valid weight strings after multiple attempts.")
         raise RuntimeError("LLM failed to provide valid weight strings after multiple attempts.")
+    
+    # no history, doesn't change self._prompts, just calling with a user prompt
+    def call_llm_for_summary(self, user_prompt, max_retries=3) -> str:
+        logging.info(f"Calling LLM for summary")
+        attempt = 0
+        while attempt < max_retries:
+            try:
+                responses = self._client.chat.completions.create(
+                    model=self._gpt_model,
+                    messages=[{"role": "user", "content": user_prompt}],
+                    temperature=self._temperature,
+                    n=self._num_suggestions,
+                )
+
+                raw_output = responses.choices[0].message.content
+
+                # this catches raw_output that is empty string or None
+                if not raw_output:
+                    logging.error(f"LLM call failed with empty response, finish reason: {responses.choices[0].finish_reason}")
+                    raise RuntimeError("LLM call failed with empty response")          
+                # Success!
+                self._total_tokens += responses.usage.total_tokens
+                self._total_query_tokens += responses.usage.prompt_tokens
+                self._total_response_tokens += responses.usage.completion_tokens
+                return raw_output
+
+            except Exception as e:
+                print(f"[ERROR] LLM call failed on attempt {attempt+1}: {e}")
+                traceback.print_exc()
+                logging.error(f"LLM call failed on attempt {attempt+1}: {traceback.format_exc()}")
+                attempt += 1
+        logging.error("LLM failed to provide valid weight strings after multiple attempts.")
+        raise RuntimeError("LLM failed to provide valid weight strings after multiple attempts.")
+
+    def get_or_generate_summary(self, summary_type:str, identifier:str, prompt:str, code_string: str, eureka_root_dir: str, override: bool = False):
+        """
+        Get or generate a summary for context code, PPO code, or success metric code.
+        summaries are saved in EUREKA_ROOT_DIR/summary.
+
+        Args:
+            summary_type (str): One of "context_code", "ppo_code", or "success_metric_code".
+            identifier (str): Either rl_task_type (for context/success metric) or rl_library (for PPO).
+            prompt (str): Instructional prompt to prepend to code_string.
+            code_string (str): The code to summarize.
+            eureka_root_dir (str): Path to the Eureka root directory.
+            override (bool): If True, regenerate and overwrite the summary even if it exists.
+
+        Returns:
+            str: The summary string.
+        """
+        os.makedirs(os.path.join(eureka_root_dir, "summary"), exist_ok=True)
+        filename = f"{summary_type}_summary_{identifier}.txt"
+        summary_path = os.path.join(eureka_root_dir, "summary", filename)
+
+        if not override and os.path.exists(summary_path):
+            with open(summary_path, "r") as f:
+                cached = f.read().strip()
+                if cached:
+                    logging.info(f"Using cached summary from {summary_path}")
+                    return cached
+
+        # Otherwise, generate new summary via LLM
+        logging.info(f"Generating new {filename}")
+        llm_input = f"{prompt}\n{code_string}"
+        summary = self.call_llm_for_summary(llm_input)
+        with open(summary_path, "w") as f:
+            f.write(summary)
+            logging.info(f"Saved new {filename}")
+        return summary
+
 
 
     def extract_code_from_response(self, response: str) -> str:

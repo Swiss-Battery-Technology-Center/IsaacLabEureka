@@ -1,0 +1,32 @@
+**Summary of Success Metric and Auxiliary Fields**
+
+1. **Success Metric (`success_metric`)**  
+   - **Physical Meaning**: Measures the fraction of environments where the end-effector (EE) is within a threshold distance (`offset`) of the target screw object.  
+   - **Computation**:  
+     - Adjusts the object’s root position by `object_offset_w` (a 3D offset in the world frame).  
+     - Computes the Euclidean distance between the EE’s target position and the adjusted object position.  
+     - Returns the mean binary success (1 if distance < `offset`, else 0) across environments.  
+
+2. **Auxiliary Fields**  
+   - **`dist`**  
+     - **Physical Meaning**: Average distance between the EE and the adjusted object position across environments.  
+     - **Relation to Success Metric**: Directly influences `success_metric` (lower `dist` → higher success rate). A decreasing `dist` trend indicates improved EE positioning.  
+
+   - **`object_offset_w`**  
+     - **Physical Meaning**: Offset applied to the object’s root position to define the target location for the EE. Likely used for curriculum learning (e.g., gradually reducing the offset to increase task difficulty).  
+     - **Relation to Success Metric**: A smaller `object_offset_w` makes the task harder (requires more precise EE alignment). If `object_offset_w` decreases over training, check if `dist` also decreases to confirm policy adaptation.  
+
+---
+
+**Key Insights for Training Analysis**  
+- **Reward Tuning**: If `success_metric` plateaus but `dist` is high, consider:  
+  - Increasing the reward weight for the `screw_engaged` term to prioritize proximity.  
+  - Adjusting `offset` (if dynamic) to balance exploration and exploitation.  
+- **Curriculum Learning**: If `object_offset_w` is part of a curriculum:  
+  - Monitor correlation between `object_offset_w` and `dist`/`success_metric`. A lagging `success_metric` after offset reduction suggests the curriculum is too aggressive.  
+- **Failure Modes**:  
+  - High `dist` + low `success_metric`: Policy struggles to approach the screw.  
+  - Low `dist` + low `success_metric`: The `offset` threshold may be too strict.  
+- **Actionable Steps**:  
+  - Plot `dist` and `object_offset_w` over time to diagnose curriculum effectiveness.  
+  - If `dist` stagnates, add auxiliary rewards for directional progress (e.g., velocity toward the object).
