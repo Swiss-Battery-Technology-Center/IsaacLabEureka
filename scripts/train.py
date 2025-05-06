@@ -39,6 +39,8 @@ def main(args_cli):
         warmstart = args_cli.warmstart,
         num_envs = args_cli.num_envs,
         resume = args_cli.resume,
+        override = args_cli.override,
+        single_run = args_cli.single_run,
     )
 
     eureka.run(max_eureka_iterations=args_cli.max_eureka_iterations)

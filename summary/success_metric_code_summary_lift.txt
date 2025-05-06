@@ -1,0 +1,72 @@
+### Summary of Success Metric Function for Lift Task
+
+This success metric evaluates a robot's ability to **lift an object to a target pose** by combining two critical sub-tasks: 
+1. **Positional accuracy** (proximity to target)
+2. **Lifting adequacy** (minimum height clearance)
+
+---
+
+#### **Core Success Metric (`success_metric`)**  
+- **Computation**:  
+  `success_metric = is_close * is_lifted`  
+  - `is_close`: Normalized proximity score between object and target (range: [0,1])  
+  - `is_lifted`: Binary flag (0 or 1) indicating if the object exceeds `min_height`  
+
+- **Physical Meaning**:  
+  A value of 1.0 requires **simultaneous satisfaction** of both conditions:  
+  - Object is within a tolerance (`std`) of the target position  
+  - Object is lifted above `min_height`  
+
+---
+
+#### **Auxiliary Fields**  
+1. **`is_close`**  
+   - **Computation**: `1 - tanh(distance / std)`  
+     - `distance`: Euclidean distance between object and target positions in world frame  
+     - `std`: Hyperparameter controlling tolerance (lower `std` = stricter proximity requirement)  
+   - **Purpose**:  
+     Measures how well the object is positioned relative to the target. Values near 1 indicate precise positioning.  
+
+2. **`is_lifted`**  
+   - **Computation**: Binary check `object_z > min_height`  
+   - **Purpose**:  
+     Tracks whether the object has been lifted above the safety threshold. A value <1 indicates failure to lift.  
+
+3. **`min_height`**  
+   - **Source**: Fixed parameter from the reward manager.  
+   - **Role**: Defines the minimum height the object must reach for the task to be considered successful.  
+
+4. **`dist`**  
+   - **Computation**: Raw Euclidean distance between object and target.  
+   - **Role**: Provides granular insight into positional errors (unlike the normalized `is_close`).  
+
+---
+
+### Training Analysis & Tuning Guidance  
+1. **Diagnosing Failures**:  
+   - **Low `success_metric`**: Check which component (`is_close` or `is_lifted`) is failing.  
+   - **Low `is_lifted`**: Robot struggles with lifting.  
+   - **Low `is_close`**: Robot struggles with positioning.  
+
+2. **Key Parameters to Tune**:  
+   - **`std` (Proximity Tolerance)**:  
+     - Decrease `std` to demand tighter positioning (if `is_close` is too lenient).  
+     - Increase `std` to ease initial learning (if positioning is too challenging early on).  
+   - **`min_height`**:  
+     - Use curriculum learning: Start with a lower `min_height`, then gradually increase it.  
+
+3. **Reward Weight Adjustments**:  
+   - If `is_lifted` is low, increase the reward weight for height achievement.  
+   - If `dist` decreases but `is_close` plateaus, reduce `std` to refine positioning.  
+
+4. **Curriculum Strategies**:  
+   - **Phase 1**: Prioritize lifting by using a low `min_height` and large `std`.  
+   - **Phase 2**: Tighten `std` and raise `min_height` as the agent masters basic lifting.  
+   - **Phase 3**: Add perturbations (e.g., target motion) once baseline performance is stable.  
+
+5. **Data Trends to Monitor**:  
+   - **`dist` distribution**: Decreasing mean/median indicates improving positioning.  
+   - **`is_lifted` stability**: Sudden drops may indicate policy collapse or environment instability.  
+   - **`success_metric` variance**: High variance suggests inconsistent policy performance.  
+
+By correlating these metrics, you can identify whether the policy is struggling with exploration (e.g., never lifting), exploitation (failing to refine positioning), or reward hacking (e.g., lifting without moving to the target).

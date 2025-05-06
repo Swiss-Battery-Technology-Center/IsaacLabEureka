@@ -28,10 +28,14 @@ Some helpful tips for writing the reward function code:
 
 MANAGER_BASED_WEIGHT_TUNING_FORMATTING_INSTRUCTIONS = """
 Your new configuraiton string should comply exactly with the structure of the previous configuration.
+The configuration you are given is not full configuration of the environment, but rather a selected subset that I wish to tune.
+Do not add new terms or remove existing terms, comply with the previous configuration.
 It will generally look like:
     {'reward.term_name.weight': value_1, 'curriculum.term_name.param_name': value_2, ...}
 I will use regex pattern of the above structure to extract the keys and values from your response. 
 Use the same keys as the previous configuration, but suggest new values.
+
+Here are some tips for the terms in general. Sometimes certain terms below might not be preset in my choice of subset for tuning.
 A key, 'reward.term_name.weight' for example, is a string enclosed by a single quote. The dots inside are used to reconstruct a nested dictionary.
 The value will be mostly float or int, but always comply with the type of the previous configuration.
 Negative reward weights are posssible, terms with negative weights serve as penalty rather than reward.

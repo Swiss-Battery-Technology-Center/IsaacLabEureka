@@ -61,6 +61,8 @@ class Eureka:
         warmstart: bool = False,
         num_envs: int = 1024,
         resume: dict = {'enabled':False, 'resume_path': ""},
+        override: bool = False,
+        single_run: bool = False,
     ):
         """Initialize the Eureka class.
 
@@ -129,6 +131,8 @@ class Eureka:
         else:
             self.task_success_reward_name = None
         self._resume = resume
+        self._override = override
+        self._single_run = single_run
         print("[INFO]: Setting up the LLM Manager...")
         logging.info("Setting up the LLM Manager...")
         self._llm_manager = LLMManager(
@@ -158,11 +162,62 @@ class Eureka:
 
 
     def run(self, max_eureka_iterations: int):
-        if self._task_manager.is_manager_based():
+        if self._single_run:
+            self.run_single_run()
+        elif self._task_manager.is_manager_based():
             self.run_manager_based(max_eureka_iterations)
         else:
             self.run_direct(max_eureka_iterations)
 
+    def run_single_run(self):
+        "just runs one process one training with tuning from source code"
+        "but with eureka success metric, logging, txt, etc"
+
+        logging.info("SINGLE RUN START")
+
+        best_run_results = {"success_metric": None}
+        gpt_weight_strings = [None]*self._num_processes
+        llm_outputs = None
+        raw_output = None
+
+        try: 
+            gpt_weight_strings = [self._task_manager._get_initial_tuning_as_string]
+            logging.info(f"TASK MANAGER TRAIN START")
+            results = self._task_manager.train(gpt_weight_strings)
+            logging.info('TASK MANAGER TRAIN COMPLETE')
+            # bad fix, gpt_weight_strings is empty at iter==0 so use prev_weights_str instead
+            # Evaluate the results
+            # llm_outputs["raw_outputs"] is the raw response string
+
+            results, best_run_results, best_run_idx = (
+                self.evaluate_results_weight_tuning(
+                    results, best_run_results
+                )
+            )
+            logging.info(f"Evaluation complete")
+            self._log_iteration_results(0, results, "")
+            logging.info(f"Iteration results saved")
+
+            if (
+                best_run_results["success_metric"] is not None
+                and np.abs(
+                    best_run_results["success_metric"] - self._success_metric_to_win
+                )
+                < self._success_metric_tolerance
+            ):
+                print(
+                    f"Task solved with success metric: {best_run_results['success_metric']}"
+                )
+        except Exception as e:
+            print(f"An error occurred during the Eureka training loop {iter}:")
+            print(e)
+            traceback.print_exc()
+            logging.error(f"An error occurred during the Eureka training loop {iter}:\n{traceback.format_exc()}")               
+        finally:
+            self._log_final_results(best_run_results, iter)
+            print("CLOSING TASK MANAGER")
+            logging.info("CLOSING TASK MANAGER")
+            self._task_manager.close()
     def run_direct(self, max_eureka_iterations: int):
         """Run the Eureka training loop.
 
@@ -227,9 +282,7 @@ class Eureka:
         Args:
             max_eureka_iterations: The maximum number of Eureka iterations to run.
         """
-        # override flag for regenerating summaries
-        # later migrate to eureka_config.yaml
-        override = True
+        override = self._override
 
         self._llm_manager.clear_prompts()
         self._llm_manager.append_system_prompt(self._get_system_prompt(env_type=self._task_manager._env_type, eureka_task=self._task_manager._eureka_task))
@@ -302,7 +355,7 @@ class Eureka:
                         # 0th iter with resume, llm gives suggestions based on previous iterations
                         print("RESUME == TRUE, CALLING LLM FROM 0TH ITER")
                         logging.info("RESUME == TRUE, CALLING LLM FROM 0TH ITER")
-                        self._llm_manager.append_user_prompt(f"Based on the previous iterations, give me {self._num_processes} new suggestion. You are encouraged to make wild guesses, since this will be the first generation in evolutioary search.\n")
+                        self._llm_manager.append_user_prompt(f"Based on the previous iterations, give me {self._num_processes} new suggestion. You are encouraged to make wild guesses, since this will be the first generation in evolutioary search. Max learning iteration is {self._task_manager._max_training_iterations} learning iterations.\n")
                         llm_outputs = self._llm_manager.call_llm()
                         print('LLM MANAGER CALLING COMPLETE')
                         logging.info('LLM MANAGER CALLING COMPLETE')
@@ -311,16 +364,22 @@ class Eureka:
                         self._llm_manager.append_assistant_prompt(raw_output)
                     else:
                         # 0th iter fresh start, llm gives random suggestions
-                        print("FRESH START, POPULATING GPT WEIGHT STRINGS")
-                        logging.info("FRESH START, POPULATING GPT WEIGHT STRINGS")
-                        SUGGESTION_PROMPT = f"Here is current configuration. Give me {self._num_processes} suggestion to start evolutionary search with, including current configuration as the first suggestion. You are encouraged to make wild guesses, since this will be the first generation in evolutioary search.\n"
-                        self._llm_manager.append_user_prompt(SUGGESTION_PROMPT + self._task_manager._get_initial_tuning_as_string)
-                        llm_outputs = self._llm_manager.call_llm()
-                        print('LLM MANAGER CALLING COMPLETE')
-                        logging.info('LLM MANAGER CALLING COMPLETE')    
-                        gpt_weight_strings = llm_outputs["weight_strings"]
-                        raw_output = llm_outputs["raw_output"]
-                        self._llm_manager.append_assistant_prompt(raw_output)
+                        if self._num_processes > 1:
+                            print("FRESH START, POPULATING GPT WEIGHT STRINGS")
+                            logging.info("FRESH START, POPULATING GPT WEIGHT STRINGS")
+                            SUGGESTION_PROMPT = f"Here is current configuration. Give me {self._num_processes} suggestion to start evolutionary search with, including current configuration as the first suggestion. You are encouraged to make wild guesses, since this will be the first generation in evolutioary search. Max learning iteration is {self._task_manager._max_training_iterations} learning iterations.\n"
+                            self._llm_manager.append_user_prompt(SUGGESTION_PROMPT + self._task_manager._get_initial_tuning_as_string)
+                            llm_outputs = self._llm_manager.call_llm()
+                            print('LLM MANAGER CALLING COMPLETE')
+                            logging.info('LLM MANAGER CALLING COMPLETE')    
+                            gpt_weight_strings = llm_outputs["weight_strings"]
+                            raw_output = llm_outputs["raw_output"]
+                            self._llm_manager.append_assistant_prompt(raw_output)
+                        else:
+                            # 0th iter single process: just use current config
+                            logging.info("Using current config as the first suggestion")
+                            gpt_weight_strings = [self._task_manager._get_initial_tuning_as_string]
+                            raw_output = ""
                 else:           
                     # llm gives suggestions based on previous iterations
                     print('LLM MANAGER CALLING START')
@@ -370,11 +429,10 @@ class Eureka:
                         f"Task solved with success metric: {best_run_results['success_metric']}"
                     )
                     break
-
-                
                 user_prompt = (results[best_run_idx]["user_prompt"] +
                                 MULTIPLE_SUGGESTIONS_INSTRUCTION.format(num_parallel_runs=self._num_processes)
                                 + MULTIPLE_SUGGESTIONS_EXAMPLE if self._num_processes > 1 else results[best_run_idx]["user_prompt"])
+                self._log_conversation()
         except Exception as e:
             print(f"An error occurred during the Eureka training loop {iter}:")
             print(e)

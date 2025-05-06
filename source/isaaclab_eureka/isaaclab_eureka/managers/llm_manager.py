@@ -9,6 +9,7 @@ import traceback
 import openai
 import logging
 
+
 class LLMManager:
     """Manager to interface with the LLM API.
 

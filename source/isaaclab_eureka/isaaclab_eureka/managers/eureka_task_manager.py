@@ -18,6 +18,7 @@ from typing import Literal
 from isaaclab_eureka import EUREKA_ROOT_DIR
 from isaaclab_eureka.utils import MuteOutput, get_freest_gpu, WrongStringFormatException, TrainingStatus, get_curriculum_term_cfg, set_curriculum_term_cfg
 from isaaclab.utils.io.yaml import dump_yaml
+import pynvml
 
 TEMPLATE_REWARD_STRING = """
 from {module_name} import *
@@ -313,7 +314,7 @@ class EurekaTaskManager:
         if self._device == "cuda":
             device_id = get_freest_gpu()
             self._device = f"cuda:{device_id}"
-        app_launcher = AppLauncher(headless=True, device=self._device)
+        app_launcher = AppLauncher(headless=True, device=self._device, video=True, enable_cameras=True)
         self._simulation_app = app_launcher.app
 
         import isaaclab_tasks  # noqa: F401
@@ -332,7 +333,7 @@ class EurekaTaskManager:
         env_cfg.scene.num_envs = self._num_envs  # ensure consistency
         self._original_env_cfg = copy.deepcopy(env_cfg)
         # Create new env
-        self._env = gym.make(self._task, cfg=env_cfg)
+        self._env = gym.make(self._task, cfg=env_cfg,render_mode="rgb_array")
 
     def _reset_all_envs(self):
         if not hasattr(self, "_env") or self._env is None:
@@ -469,6 +470,7 @@ class EurekaTaskManager:
                         self._prepare_eureka_environment_reset_weights(
                             new_weights_string
                         )
+                        prev_config = self.get_initial_tuning() # in case new_weights_string do not include all terms
                         print(f"PROCESS {self._idx} PREPARE EUREKA ENVIRONMENT RESET WEIGHTS COMPLETE")
                     self._prepare_eureka_environment_reset_idx()
                     print(f"PROCESS {self._idx} PREPARE EUREKA ENVIRONMENT RESET IDX COMPLETE")
@@ -533,7 +535,7 @@ class EurekaTaskManager:
             # print(f"PROCESS {self._idx} EMPTYING CUDA CACHE")
             # torch.cuda.empty_cache()
             #
-            result["prev_config"] = new_weights_string
+            result["prev_config"] = new_weights_string # should I use prev_config for reward_weight_tuning?
             self._eureka_iter += 1
             self._results_queue.put((self._idx, result))
             print(f"PROCESS {self._idx} PUSHING TO RESULTS QUEUE COMPLETE")
@@ -546,20 +548,32 @@ class EurekaTaskManager:
 
     def get_initial_tuning(self):
         env = self._env.unwrapped
+        tuning_dict = {}
 
         # === Rewards ===
         rm = env.reward_manager
-        tuning_dict = {
+        reward_dict = {
             f"reward.{name}.weight": cfg.weight
             for name, cfg in zip(rm._term_names, rm._term_cfgs)
         }
 
         # === Curriculum ===
         cm = env.curriculum_manager
+        curriculum_dict = {}
         for name, cfg in zip(cm._term_names, cm._term_cfgs):
             for key, val in cfg.params.items():
                 if key == "weight" or "num_steps" in key:
-                    tuning_dict[f"curriculum.{name}.{key}"] = val
+                    curriculum_key = f"curriculum.{name}.{key}"
+                    curriculum_dict[curriculum_key] = val
+
+        # === Combine and Filter ===
+        all_params = {**reward_dict, **curriculum_dict}
+
+        for param_path in self._parameters_to_tune:
+            if param_path in all_params:
+                tuning_dict[param_path] = all_params[param_path]
+            else:
+                raise KeyError(f"Parameter {param_path} not found in environment configuration.")
 
         return repr(tuning_dict)
 
@@ -715,7 +729,16 @@ class EurekaTaskManager:
                 log_dir += f"_{agent_cfg.run_name}"
             self._log_dir = os.path.join(log_root_path, log_dir)
 
-            env = RslRlVecEnvWrapper(self._env)
+            # always record video
+            video_kwargs = {
+                "video_folder": os.path.join(self._log_dir, "videos", "train"),
+                "step_trigger": lambda step: step % 2000 == 0,
+                "video_length": 200,
+                "disable_logger": True,
+            }
+            import gymnasium as gym
+            env = gym.wrappers.RecordVideo(self._env, **video_kwargs)
+            env = RslRlVecEnvWrapper(env)
             print("RSL RL VEC ENV WRAPPER COMPLETE")
             agent_cfg_dict = agent_cfg.to_dict()
             if self._eureka_task == "ppo_tuning":
@@ -905,8 +928,6 @@ class EurekaTaskManager:
         intro = "Here is environment source code\n\n"
         return intro + all_text
 
-
-import pynvml
 
 def log_gpu_usage(pid: int, idx: int):
     pynvml.nvmlInit()

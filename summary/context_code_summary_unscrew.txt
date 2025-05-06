@@ -1,95 +1,61 @@
-### Key Components Summary for SBTC Unscrew Environment
+**Summary of SBTC Unscrew Environment Configuration**
 
----
+**Reward Components:**
+1. **EE Verticality (Axis Alignment):**
+   - *Computation:* Measures alignment between end-effector's vertical axis and target orientation (Y-axis up). Uses vector similarity between current EE orientation and target quaternion.
+   - *Purpose:* Ensures proper screwdriver alignment for engagement. Provides continuous reward based on cosine similarity (range: 0-1 before scaling).
 
-#### **Reward Terms**
-1. **EE Verticality**  
-   - *Computation*: Measures alignment between end-effector's Z-axis and target vertical axis (Y-up quaternion).  
-   - *Range*: `[0, 1]` (1 = perfect alignment).  
-   - *Purpose*: Encourages proper screwdriver orientation for engagement.
+2. **Yaw Alignment:**
+   - *Computation:* Compares yaw angle difference between object and EE using 6x symmetry (for hexagonal screws). Calculated via angular difference in 60° increments.
+   - *Purpose:* Aligns screwdriver with screw head's rotation axis. Provides dense reward for rotational alignment.
 
-2. **Yaw Alignment**  
-   - *Computation*: Compares yaw angle between EE and object, normalized for hexagonal screws (6 repeats for 60° symmetry).  
-   - *Range*: `[0, 1]` (1 = aligned).  
-   - *Purpose*: Ensures rotational alignment for screw insertion.
+3. **Position Similarity (Coarse/Medium/Fine):**
+   - *Computation:* Three-tiered proximity rewards using exponential decay functions (σ=5,50,100) to create concentric reward fields around target position. Coarse (0.25x) rewards proximity up to 20cm, Medium (0.5x) up to 2cm, Fine (0.75x) up to 1cm.
+   - *Purpose:* Creates dense reward gradients at different spatial scales to guide EE toward target.
 
-3. **Position Similarity (Coarse/Medium/Fine)**  
-   - *Computation*: Squash function rewards proximity between EE and object.  
-     - Coarse (`sigma=5`), Medium (`sigma=50`), Fine (`sigma=100`).  
-   - *Range*: `[0, 1]` (1 = exact match).  
-   - *Purpose*: Guides EE toward the screw at increasing precision levels.
+4. **Screw Engagement:**
+   - *Computation:* Binary reward (0/1) using tanh step function. Activates when EE is within 0.2mm of target (σ=0.0007). Combines with position similarity rewards.
+   - *Purpose:* Final engagement reward for successful contact. Threshold set slightly above surface to encourage contact force.
 
-4. **Screw Engaged**  
-   - *Computation*: Tanh-based step function triggered when EE is within `0.002m` of the target.  
-   - *Range*: `[0, 1]` (1 = fully engaged).  
-   - *Purpose*: Signals successful screw contact.
+5. **Contact Management:**
+   - *Screw Contact:* Rewards contact forces >2.5N in Z-axis (screw axis)
+   - *Table Contact:* Penalizes contact with table (body ID 1) with -10x penalty
+   - *Purpose:* Teaches controlled contact with screw while avoiding collisions.
 
-5. **Screw Contact**  
-   - *Computation*: Detects contact forces > `2.5N` between EE and screw.  
-   - *Range*: Binary (0/1).  
-   - *Purpose*: Rewards maintaining contact during unscrewing.
+6. **Motion Regularization:**
+   - *Action Rate:* L2 penalty on action changes (Δa) to encourage smooth control
+   - *Joint Velocity:* Penalizes high joint velocities (L2 norm) for safety
 
-6. **Table Contact Penalty**  
-   - *Computation*: Penalizes EE contact with the table.  
-   - *Range*: Binary (0/1).  
-   - *Purpose*: Prevents collisions with the environment.
+**Curriculum Components:**
+1. **Position Similarity Offset Reduction:**
+   - *Parameters:* Reduces Z-offset in position rewards from 0.006m to 0m over 300-600k steps
+   - *Effect:* Gradually moves "sweet spot" closer to actual contact point as policy improves
 
-7. **Action Rate Penalty**  
-   - *Computation*: L2 penalty on action changes between steps.  
-   - *Purpose*: Encourages smooth control.
+2. **Joint Effort Deadzone Expansion:**
+   - *Parameters:* Increases deadzone from 0.1N to 0.5N over 1.1M steps
+   - *Effect:* Allows larger control inputs as policy becomes more precise
 
-8. **Joint Velocity Penalty**  
-   - *Computation*: L2 penalty on joint velocities.  
-   - *Purpose*: Prevents aggressive movements.
+3. **EE Pose Randomization:**
+   - *Parameters:* Reduces position noise from 4cm to 2cm and orientation noise from 0.2 rad to 0.2 rad over 600k steps
+   - *Effect:* Starts with large initial randomization for exploration, then tightens as policy converges
 
----
+**Domain Randomization:**
+1. **Initial Pose Randomization:**
+   - Object position: ±10cm XYZ, ±60° yaw
+   - EE position: ±4cm XYZ, ±0.2 rad orientation
 
-#### **Curriculum Terms**
-1. **Initial EE Pose Randomization**  
-   - *Parameters*:  
-     - Initial offset: `(0.0, 0.0, 0.05m)` → `(0.0, 0.0, 0.21m)` (Z-axis).  
-     - Position noise: `±0.04m` → `±0.2m`.  
-   - *Trigger*: Based on `screw_engaged` reward performance.  
-   - *Effect*: Increases initial EE pose difficulty as agent improves.
+2. **Dynamic Randomization:**
+   - PD gains randomized (50-150 P, 0.25-1.75 D)
+   - Joint effort deadzone randomized (0-0.1N)
 
-2. **Object Offset Reduction**  
-   - *Parameters*:  
-     - Target offset: `(0.0, 0.0, 0.006m)` → `(0.0, 0.0, 0.0m)`.  
-   - *Affected Terms*: All position similarity rewards and `screw_engaged`.  
-   - *Effect*: Shifts target to exact screw position as agent learns.
+**Key Environment Structure:**
+- 100Hz physics (10ms timestep) with 4:1 control decimation
+- 1024 parallel environments with 2.5m spacing
+- Contact detection uses filtered primitives (screw vs table)
+- Observation space includes EE position (3), rotation (3), velocity (6), actions (6), object position (3), yaw (1), contact forces (3)
 
-3. **Joint Effort Deadzone Increase**  
-   - *Parameters*:  
-     - Deadzone range: `[0.0, 0.1]` → `[0.0, 0.5]`.  
-   - *Effect*: Forces agent to overcome larger controller deadzones, improving robustness.
+**Reward Synergy:**
+The coarse position rewards create broad exploration, medium rewards guide to proximity, and fine rewards enable precise alignment. Verticality/yaw rewards ensure proper orientation while contact rewards and penalties shape the interaction. The curriculum's offset reduction coordinates with position rewards to progressively focus on precise engagement.
 
----
-
-#### **Domain Randomization**
-- **Object Pose**: Randomized on reset (`x/y/z: ±0.1m`, `yaw: ±π/6`).  
-- **PD Gains**: Randomized (`p: [50, 150]`, `d: [0.25, 1.75]`).  
-- **Joint Effort Deadzones**: Randomized during training.  
-
----
-
-#### **Environment Structure**
-- **Observations**:  
-  - EE position/velocity, object position/yaw, contact forces, and action history.  
-  - Critic gets filtered contact forces for stability.  
-- **Actions**: Operational Space Control (OSC) for 6-DoF EE motion.  
-- **Termination**: Only on time-out (`5s` episode).  
-
----
-
-#### **Reward Design Strategy**
-- **Dense Guidance**: Coarse → medium → fine position rewards guide the EE to the screw.  
-- **Alignment Phases**: Verticality and yaw alignment ensure proper screwdriver orientation.  
-- **Contact Management**: `screw_contact` and `table_contact` balance engagement and collision avoidance.  
-- **Curriculum Progression**: Initial randomization and target offsets adapt to agent capability, ensuring gradual skill acquisition.
-
----
-
-#### **Tuning Considerations**
-- **Reward Balance**: Ensure position/yaw alignment terms dominate early training, with screw engagement becoming critical later.  
-- **Curriculum Timing**: Adjust step thresholds (`num_steps_start/end`) based on learning speed.  
-- **Domain Randomization Ranges**: Wider ranges improve sim-to-real transfer but may slow training.
+**Curriculum Impact:**
+Initial large position offsets and randomization allow exploration of the workspace. As the policy improves, the system reduces position tolerances and increases control precision requirements while maintaining safety through velocity penalties. The deadzone expansion allows more aggressive control once the policy can reliably approach the target.

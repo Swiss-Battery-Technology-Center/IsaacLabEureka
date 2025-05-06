@@ -1,0 +1,49 @@
+**SBTC Lift Environment Summary**
+
+**1. Key Components:**
+- **Scene Setup**: Contains a robot, target object, end-effector frame, contact sensors. Uses domain randomization for initial positions, joint parameters, and velocities.
+- **MDP Settings**: Defines target poses, actions (arm & gripper), and observations (gripper position, EE pose, object state).
+
+**2. Reward Structure (Dense Rewards):**
+- **Orientation Alignment** (`ee_orientation_alignment`): 
+  - *Computation*: Measures quaternion alignment between EE and target orientation using vector similarity. 
+  - *Purpose*: Ensures correct EE orientation for grasping. 
+
+- **Reaching Object** (`reaching_object`):
+  - *Computation*: Tanh-based reward for EE proximity to object (σ=0.1). 
+  - *Range*: ~0 (far) to 1 (close). 
+
+- **Lifting Object** (`lifting_object`):
+  - *Computation*: Binary reward if object height > 0.04m. 
+  - *Purpose*: Encourages lifting the object. 
+
+- **Object Tracking** (`object_goal_tracking`):
+  - *Computation*: Combines tanh-based position tracking (σ=0.3) and velocity stabilization. 
+  - *Activation*: Enabled via curriculum (initial weight=0 → 10.0). 
+
+- **Action Penalties** (`action_rate`, `gripper_action_rate`):
+  - *Computation*: Penalizes L2 norm of action rate. Prevents abrupt movements.
+
+**3. Curriculum:**
+- **Progressive Reward Activation**:
+  - `object_goal_tracking` weight increases from 0 to 10.0 after 200 steps. Focus shifts to target tracking after initial lifting. 
+  - `action_rate` penalty reduced to -0.1 after 500 steps to allow more aggressive movements once the policy stabilizes.
+
+- **Domain Randomization Adjustment**:
+  - **EE Position Randomization**: Initial reset noise increases (position: 0.1m, rotation: 0.1 rad) to 0.2m/0.2 rad over 500 steps. Forces adaptation to varying initial conditions.
+  - **Gripper Velocity Limits**: Randomized (0.3-3.0x base velocity) to handle dynamic changes.
+
+**4. Domain Randomization (EventCfg):**
+- **Joint Friction**: Randomized (0.0-0.05 Nm) to simulate varying friction.
+- **Action Scaling**: Randomizes OSC controller gains (position: 0.02-0.2, orientation: 0.01-0.1) for robustness.
+- **Object Position Reset**: Randomizes initial object position (±0.1m in X/Y) to prevent overfitting.
+
+**5. Key Parameters to Tune:**
+- **Reward Weights**: Balance orientation vs. position rewards. E.g., increase `lifting_object` once the object is consistently lifted.
+- **Curriculum Timing**: Adjust when to activate tracking rewards based on policy progress.
+- **Randomization Ranges**: Expand position/velocity noise if the policy fails to generalize.
+- **Action Penalty Decay**: Adjust penalty decay rate to balance smoothness vs. speed.
+
+**6. Critical Observations:**
+- **Observation Space**: Combines EE pose, object position, and target pose. Ensure all are correctly normalized.
+- **Reward Sparse-to-Dense Transition**: Curriculum shifts from simple (lifting) to complex (tracking) tasks. Tune the transition to avoid local optima.

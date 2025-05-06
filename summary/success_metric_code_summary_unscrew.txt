@@ -1,32 +1,79 @@
-**Summary of Success Metric and Auxiliary Fields**
+### Summary of Success Metric and Auxiliary Fields
 
-1. **Success Metric (`success_metric`)**  
-   - **Physical Meaning**: Measures the fraction of environments where the end-effector (EE) is within a threshold distance (`offset`) of the target screw object.  
-   - **Computation**:  
-     - Adjusts the object’s root position by `object_offset_w` (a 3D offset in the world frame).  
-     - Computes the Euclidean distance between the EE’s target position and the adjusted object position.  
-     - Returns the mean binary success (1 if distance < `offset`, else 0) across environments.  
+#### **Success Metric (`success_metric`)**  
+**Physical Meaning**:  
+The `success_metric` quantifies how well the end-effector (EE) is positioned near the screw (object) during the unscrewing task. It is a **smooth, continuous measure** ranging between `0` (failure) and `1` (success), where:  
+- `1`: EE is **within** the target proximity (`offset` distance) of the screw.  
+- `0`: EE is **far outside** the target proximity.  
 
-2. **Auxiliary Fields**  
-   - **`dist`**  
-     - **Physical Meaning**: Average distance between the EE and the adjusted object position across environments.  
-     - **Relation to Success Metric**: Directly influences `success_metric` (lower `dist` → higher success rate). A decreasing `dist` trend indicates improved EE positioning.  
+**Computation**:  
+1. **Distance Calculation**:  
+   - Compute Euclidean distance between the EE and the screw's root position:  
+     `dist = ||ee_pos_w - object_pos_w||`  
+2. **Smooth Thresholding**:  
+   - Apply a smooth transition using `tanh` centered at `offset`, scaled by `sigma`:  
+     `step = (tanh((dist - offset) / sigma) + 1) * 0.5`  
+   - `step` maps `dist` to `[0, 1]`, where:  
+     - `step ≈ 0` when `dist ≪ offset` (EE is very close).  
+     - `step ≈ 1` when `dist ≫ offset` (EE is far away).  
+3. **Success Metric**:  
+   - Invert `step` to align with intuitive success:  
+     `success = 1 - step`  
 
-   - **`object_offset_w`**  
-     - **Physical Meaning**: Offset applied to the object’s root position to define the target location for the EE. Likely used for curriculum learning (e.g., gradually reducing the offset to increase task difficulty).  
-     - **Relation to Success Metric**: A smaller `object_offset_w` makes the task harder (requires more precise EE alignment). If `object_offset_w` decreases over training, check if `dist` also decreases to confirm policy adaptation.  
+**Key Parameters**:  
+- `offset` (float): Target proximity threshold. EE must stay within this distance for high success.  
+- `sigma` (float): Smoothness of the transition between success/failure. Smaller `sigma` = sharper transition.  
 
 ---
 
-**Key Insights for Training Analysis**  
-- **Reward Tuning**: If `success_metric` plateaus but `dist` is high, consider:  
-  - Increasing the reward weight for the `screw_engaged` term to prioritize proximity.  
-  - Adjusting `offset` (if dynamic) to balance exploration and exploitation.  
-- **Curriculum Learning**: If `object_offset_w` is part of a curriculum:  
-  - Monitor correlation between `object_offset_w` and `dist`/`success_metric`. A lagging `success_metric` after offset reduction suggests the curriculum is too aggressive.  
-- **Failure Modes**:  
-  - High `dist` + low `success_metric`: Policy struggles to approach the screw.  
-  - Low `dist` + low `success_metric`: The `offset` threshold may be too strict.  
-- **Actionable Steps**:  
-  - Plot `dist` and `object_offset_w` over time to diagnose curriculum effectiveness.  
-  - If `dist` stagnates, add auxiliary rewards for directional progress (e.g., velocity toward the object).
+#### **Auxiliary Fields**  
+1. **`dist` (Mean Distance)**:  
+   - **Physical Meaning**: Average Euclidean distance between EE and screw across environments.  
+   - **Relation to Success Metric**: Directly inversely proportional to `success_metric`.  
+     - Decreasing `dist` → Higher `success_metric`.  
+     - Use this to diagnose whether low `success_metric` is due to poor EE positioning or overly strict `offset`/`sigma`.  
+
+2. **`object_offset` (Object Position Offset)**:  
+   - **Physical Meaning**: Offset applied to the screw’s root position (currently `(0, 0, 0)` in code).  
+   - **Relation to Success Metric**:  
+     - Non-zero values would indicate a shifted target position (e.g., for curriculum learning).  
+     - Currently unused (`mean = 0`), but could signal misconfiguration if non-zero in training logs.  
+
+---
+
+### Training Analysis & Recommendations  
+#### **Interpreting Metrics**  
+- **Ideal Progression**:  
+  - `success_metric` ↑ + `dist` ↓ → Agent learns to position EE near the screw.  
+  - Early training: Expect low `success_metric` and high `dist`.  
+  - Mid/late training: `dist` should stabilize near or below `offset`.  
+
+- **Common Issues**:  
+  - **Plateaued `success_metric` with High `dist`**:  
+    - Agent fails to approach the screw.  
+    - **Fix**: Increase reward weight for `screw_engaged` term or simplify the task (e.g., larger initial `offset`).  
+  - **High `success_metric` but Task Not Completed**:  
+    - Metric is decoupled from actual unscrewing (e.g., no orientation tracking).  
+    - **Fix**: Add orientation-based terms to the reward/success metric.  
+
+#### **Reward Weight Tuning**  
+- If `dist` decreases too slowly:  
+  - Increase the weight of the `screw_engaged` reward term to prioritize EE positioning.  
+- If `dist` oscillates:  
+  - Reduce `sigma` to sharpen the success threshold, providing clearer gradients.  
+
+#### **Curriculum Learning**  
+- **Dynamic `offset`**:  
+  - Start with a large `offset` (easy mode) and gradually reduce it to force precision.  
+  - Example: `offset = 0.1 → 0.01` over 1M steps.  
+- **Adaptive `sigma`**:  
+  - Begin with large `sigma` (smooth rewards) and decrease it as training progresses to refine behavior.  
+
+#### **Debugging via `object_offset`**  
+- If `object_offset` becomes non-zero unexpectedly:  
+  - Check for code/config errors altering the screw’s target position.  
+  - Use this field to validate curriculum policies that dynamically shift the target.  
+
+---
+
+This metric focuses **only on EE proximity**—combine it with orientation, force, or task-specific metrics (e.g., screw rotation angle) for a comprehensive success signal.

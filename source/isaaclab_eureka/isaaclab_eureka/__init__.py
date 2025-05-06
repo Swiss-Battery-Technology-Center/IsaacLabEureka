@@ -5,5 +5,5 @@
 import os
 
 EUREKA_ROOT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), *[".."] * 3)
-
+ISAACLAB_ROOT_DIR = os.path.join(EUREKA_ROOT_DIR, "..", "isaaclab")
 from .eureka import Eureka
