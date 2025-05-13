@@ -104,6 +104,7 @@ class EurekaTaskManager:
         parameters_to_tune: list[str] = [],
         warmstart: bool = False,
         num_envs: int = 1024,
+        video: bool = False,
     ):
         """Initialize the task manager. Each process will create an independent training run.
 
@@ -133,14 +134,13 @@ class EurekaTaskManager:
         self._warmstart = warmstart
         self._num_envs = num_envs
         self._skrl_rollout=None
+        self._video = video
         match = re.search(r"SBTC-([A-Za-z]+)", task)
         rl_task_type = match.group(1).lower() if match else ""
         self._rl_task_type = rl_task_type # "lift", "unscrew", ...
         self._processes = dict()
         # Used to communicate the reward functions to the processes
-        self._rewards_queues = [
-            multiprocessing.Queue() for _ in range(self._num_processes)
-        ]
+        self._rewards_queue = multiprocessing.Queue()
         # Used to communicate the observations method to the main process
         self._observations_queue = multiprocessing.Queue()
         # Used to communicate the results of the training runs to the main process
@@ -151,15 +151,15 @@ class EurekaTaskManager:
         # self._weights_queues = [multiprocessing.Queue() for _ in range(self._num_processes)]
         # Used to signal the processes to terminate
         self.termination_event = multiprocessing.Event()
-        for idx in range(self._num_processes):
+        for idx in range(1):
             if self.is_manager_based():
                 p = multiprocessing.Process(
                     target=self._worker_manager_based,
-                    args=(idx, self._rewards_queues[idx]),
+                    args=(idx, self._rewards_queue),
                 )
             else:
                 p = multiprocessing.Process(
-                    target=self._worker, args=(idx, self._rewards_queues[idx])
+                    target=self._worker, args=(idx, self._rewards_queue)
                 )
             self._processes[idx] = p
             p.start()
@@ -193,8 +193,8 @@ class EurekaTaskManager:
         """Close the task manager and clean up the processes."""
         self.termination_event.set()
         # Send a stop signal to the processes
-        for rewards_queue in self._rewards_queues:
-            rewards_queue.put("Stop")
+
+        self._rewards_queue.put("Stop")
         for process in self._processes.values():
             process.join()
 
@@ -242,8 +242,8 @@ class EurekaTaskManager:
                 unique_reward_methods = unique_reward_methods[:self._num_processes]
 
             # Step 3: Send rewards to processes
-            for idx, rewards_queue in enumerate(self._rewards_queues):
-                rewards_queue.put(unique_reward_methods[idx])
+            for idx in range(len(unique_reward_methods)):
+                self._rewards_queue.put(unique_reward_methods[idx])
             print("PUSHING REWARD STRINGS TO REWARDS QUEUE COMPLETE")
             logging.info(f"Pushed unique reward strings to rewards queue:\n {unique_reward_methods}")
 
@@ -314,7 +314,7 @@ class EurekaTaskManager:
         if self._device == "cuda":
             device_id = get_freest_gpu()
             self._device = f"cuda:{device_id}"
-        app_launcher = AppLauncher(headless=True, device=self._device, video=True, enable_cameras=True)
+        app_launcher = AppLauncher(headless=True, device=self._device, video=self._video, enable_cameras=self._video)
         self._simulation_app = app_launcher.app
 
         import isaaclab_tasks  # noqa: F401
@@ -333,7 +333,10 @@ class EurekaTaskManager:
         env_cfg.scene.num_envs = self._num_envs  # ensure consistency
         self._original_env_cfg = copy.deepcopy(env_cfg)
         # Create new env
-        self._env = gym.make(self._task, cfg=env_cfg,render_mode="rgb_array")
+        if self._video:
+            self._env = gym.make(self._task, cfg=env_cfg,render_mode="rgb_array")
+        else:
+            self._env = gym.make(self._task, cfg=env_cfg)
 
     def _reset_all_envs(self):
         if not hasattr(self, "_env") or self._env is None:
@@ -432,14 +435,14 @@ class EurekaTaskManager:
         )
 
     def _worker_manager_based(self, idx: int, rewards_queue: multiprocessing.Queue):
-        self._idx = idx
+        string_counter = 0
         self._has_sent_initial_tuning = False
-        self._eureka_iter = 0
-        print(f"[INFO] PROCESS {self._idx} started with PID: {os.getpid()}")
         while not self.termination_event.is_set():
+            self._eureka_iter = string_counter // self._num_processes
+            self._idx = string_counter % self._num_processes
             if not hasattr(self, "_env"):
                 self._create_environment()
-                print(f"PROCESS {self._idx} SELF CREATE ENVIRONMENT COMPLETE")
+                print(f"Iter {self._eureka_iter} string {self._idx} SELF CREATE ENVIRONMENT COMPLETE")
                 if self._idx == 0 and not self._has_sent_initial_tuning:
                     if self._eureka_task == "reward_weight_tuning":
                         print("GETTING INITIAL WEIGHTS")
@@ -458,9 +461,10 @@ class EurekaTaskManager:
             # if weight string was not properly formatted, llm manager will return ""
             # do exception handling here
             new_weights_string = rewards_queue.get()
+            string_counter += 1
             if new_weights_string == "Stop":
                 break
-            print(f"PROCESS {self._idx} GOT NEW WEIGHTS STRING FROM REWARD QUEUE")
+            print(f"Iter {self._eureka_iter} string {self._idx}  GOT NEW WEIGHTS STRING FROM REWARD QUEUE")
             print(f"new weights string: {new_weights_string}")
             if (
                 len(new_weights_string) > 0
@@ -471,9 +475,9 @@ class EurekaTaskManager:
                             new_weights_string
                         )
                         prev_config = self.get_initial_tuning() # in case new_weights_string do not include all terms
-                        print(f"PROCESS {self._idx} PREPARE EUREKA ENVIRONMENT RESET WEIGHTS COMPLETE")
+                        print(f"Iter {self._eureka_iter} string {self._idx}  PREPARE EUREKA ENVIRONMENT RESET WEIGHTS COMPLETE")
                     self._prepare_eureka_environment_reset_idx()
-                    print(f"PROCESS {self._idx} PREPARE EUREKA ENVIRONMENT RESET IDX COMPLETE")
+                    print(f"Iter {self._eureka_iter} string {self._idx}  PREPARE EUREKA ENVIRONMENT RESET IDX COMPLETE")
                     context = MuteOutput() if self._idx > 0 else nullcontext()
                     with context:
                         if self._eureka_task == "ppo_tuning":
@@ -491,32 +495,31 @@ class EurekaTaskManager:
                                     f"Failed to parse weight string: {e}"
                                 )
                             print('SELF PPO PARAM STRING COMPLETE')
-                        print(f"PROCESS {self._idx} STARTING RUN TRAINING")
-                        log_gpu_usage(os.getpid(), self._idx)
+                        print(f"Iter {self._eureka_iter} string {self._idx}  STARTING RUN TRAINING")
                         self._run_training()
-                        log_gpu_usage(os.getpid(), self._idx)
-                        print(f"PROCESS {self._idx} RUN TRAINING COMPLETE")
+                        print(f"Iter {self._eureka_iter} string {self._idx}  RUN TRAINING COMPLETE")
                         # this line will not run if training fails, so run it in except block as well
-                        print(f"PROCESS {self._idx} RESETTING ALL ENVS")
+                        print(f"Iter {self._eureka_iter} string {self._idx} RESETTING ALL ENVS")
                         self._reset_all_envs()
-                        print(f"PROCESS {self._idx} RESET ALL ENVS COMPLETE")
+                        print(f"Iter {self._eureka_iter} string {self._idx} RESET ALL ENVS COMPLETE")
                     result = {
                         "success": TrainingStatus.SUCCESS, 
                         "log_dir": self._log_dir
                         }
                 except WrongStringFormatException as e:
-                    print(f"PROCESS {self._idx} WRONG STRING FORMAT EXCEPTION")
+                    print(f"Iter {self._eureka_iter} string {self._idx} WRONG STRING FORMAT EXCEPTION")
                     result = {
                         "success": TrainingStatus.FORMAT_ERROR,
                         "exception": traceback.format_exc(),
 
                     }
+                    self._reset_all_envs()
                     print(traceback.format_exc())
                 except Exception as e:
                     # torch.cuda.empty_cache()
-                    print(f"PROCESS {self._idx} TRAINING CRASHED, RESETTING ALL ENVS")
+                    print(f"Iter {self._eureka_iter} string {self._idx} TRAINING CRASHED, RESETTING ALL ENVS")
                     self._reset_all_envs()
-                    print(f"PROCESS {self._idx} RESET ALL ENVS COMPLETE")
+                    print(f"Iter {self._eureka_iter} string {self._idx} RESET ALL ENVS COMPLETE")
                     result = {
                         "success": TrainingStatus.CRASH,
                         "log_dir": self._log_dir,
@@ -526,7 +529,7 @@ class EurekaTaskManager:
                     print(traceback.format_exc())
             else:
                 # new_weights_string = "", to intentionally skip training
-                print(f"PROCESS {self._idx} INTENTIONALLY SKIPPED TRAINING.")
+                print(f"Iter {self._eureka_iter} string {self._idx} INTENTIONALLY SKIPPED TRAINING.")
                 result = {
                     "success": TrainingStatus.SKIPPED,
                 }
@@ -534,13 +537,11 @@ class EurekaTaskManager:
             # import torch
             # print(f"PROCESS {self._idx} EMPTYING CUDA CACHE")
             # torch.cuda.empty_cache()
-            #
             result["prev_config"] = new_weights_string # should I use prev_config for reward_weight_tuning?
-            self._eureka_iter += 1
             self._results_queue.put((self._idx, result))
-            print(f"PROCESS {self._idx} PUSHING TO RESULTS QUEUE COMPLETE")
+            print(f"Iter {self._eureka_iter} string {self._idx} PUSHING TO RESULTS QUEUE COMPLETE")
         # Clean up
-        print(f"[INFO]: Run {self._idx} terminated, closing ENV and SIMULATION_APP.")
+        print(f"[INFO]: Run terminated, closing ENV and SIMULATION_APP.")
         self._env.close()
         self._simulation_app.close()
         # messages here won't print
@@ -737,8 +738,11 @@ class EurekaTaskManager:
                 "disable_logger": True,
             }
             import gymnasium as gym
-            env = gym.wrappers.RecordVideo(self._env, **video_kwargs)
-            env = RslRlVecEnvWrapper(env)
+            if self._video:
+                env = gym.wrappers.RecordVideo(self._env, **video_kwargs)
+                env = RslRlVecEnvWrapper(env)
+            else:
+                env = RslRlVecEnvWrapper(self._env)
             print("RSL RL VEC ENV WRAPPER COMPLETE")
             agent_cfg_dict = agent_cfg.to_dict()
             if self._eureka_task == "ppo_tuning":

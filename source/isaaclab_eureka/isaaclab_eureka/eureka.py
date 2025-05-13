@@ -61,8 +61,9 @@ class Eureka:
         warmstart: bool = False,
         num_envs: int = 1024,
         resume: dict = {'enabled':False, 'resume_path': ""},
-        override: bool = False,
+        use_cache: bool = True,
         single_run: bool = False,
+        video: bool = False,
     ):
         """Initialize the Eureka class.
 
@@ -131,7 +132,7 @@ class Eureka:
         else:
             self.task_success_reward_name = None
         self._resume = resume
-        self._override = override
+        self._use_cache = use_cache
         self._single_run = single_run
         print("[INFO]: Setting up the LLM Manager...")
         logging.info("Setting up the LLM Manager...")
@@ -158,6 +159,7 @@ class Eureka:
             parameters_to_tune=parameters_to_tune,
             warmstart=warmstart,
             num_envs=num_envs,
+            video=video,
         )
 
 
@@ -282,7 +284,7 @@ class Eureka:
         Args:
             max_eureka_iterations: The maximum number of Eureka iterations to run.
         """
-        override = self._override
+        use_cache = self._use_cache
 
         self._llm_manager.clear_prompts()
         self._llm_manager.append_system_prompt(self._get_system_prompt(env_type=self._task_manager._env_type, eureka_task=self._task_manager._eureka_task))
@@ -305,7 +307,7 @@ class Eureka:
                                                                          CONTEXT_CODE_SUMMARIZATION_PROMPT,
                                                                          smart_context_code_string,
                                                                          EUREKA_ROOT_DIR,
-                                                                         override=override)
+                                                                         use_cache=use_cache)
             self._llm_manager.append_assistant_prompt(context_code_summary)
             print("CONTEXT CODE SUMMARY TO ASSISTANT PROMPT COMPLETE")
             logging.info("CONTEXT CODE SUMMARY TO ASSISTANT PROMPT COMPLETE")
@@ -317,7 +319,7 @@ class Eureka:
                                                                          PPO_SUMMARIZATION_PROMPT,
                                                                          ppo_code_string,
                                                                          EUREKA_ROOT_DIR,
-                                                                         override=override)
+                                                                         use_cache=use_cache)
             self._llm_manager.append_assistant_prompt(ppo_code_summary)
             print("PPO SUMMARY TO ASSISTANT PROMPT COMPLETE")
             logging.info("PPO SUMMARY TO ASSISTANT PROMPT COMPLETE")
@@ -328,7 +330,7 @@ class Eureka:
                                                                          SUCCESS_METRIC_SUMMARIZATION_PROMPT,
                                                                          success_metric_code_string,
                                                                          EUREKA_ROOT_DIR,
-                                                                         override=override)
+                                                                         use_cache=use_cache)
         self._llm_manager.append_assistant_prompt(success_metric_code_summary)
         print("SUCCESS METRIC CODE SUMMARY TO ASSISTANT PROMPT COMPLETE")
         logging.info("SUCCESS METRIC CODE SUMMARY TO ASSISTANT PROMPT COMPLETE")

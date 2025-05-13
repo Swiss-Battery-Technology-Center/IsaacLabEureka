@@ -161,7 +161,7 @@ class LLMManager:
         logging.error("LLM failed to provide valid weight strings after multiple attempts.")
         raise RuntimeError("LLM failed to provide valid weight strings after multiple attempts.")
 
-    def get_or_generate_summary(self, summary_type:str, identifier:str, prompt:str, code_string: str, eureka_root_dir: str, override: bool = False):
+    def get_or_generate_summary(self, summary_type:str, identifier:str, prompt:str, code_string: str, eureka_root_dir: str, use_cache: bool = True):
         """
         Get or generate a summary for context code, PPO code, or success metric code.
         summaries are saved in EUREKA_ROOT_DIR/summary.
@@ -181,7 +181,7 @@ class LLMManager:
         filename = f"{summary_type}_summary_{identifier}.txt"
         summary_path = os.path.join(eureka_root_dir, "summary", filename)
 
-        if not override and os.path.exists(summary_path):
+        if use_cache and os.path.exists(summary_path):
             with open(summary_path, "r") as f:
                 cached = f.read().strip()
                 if cached:
