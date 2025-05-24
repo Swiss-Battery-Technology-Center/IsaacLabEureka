@@ -34,16 +34,27 @@ It will generally look like:
     {'reward.term_name.weight': value_1, 'curriculum.term_name.param_name': value_2, ...}
 I will use regex pattern of the above structure to extract the keys and values from your response. 
 Use the same keys as the previous configuration, but suggest new values.
+If term name is reset_robot_joints but you say reset_robot_joint in your response, I will not be able to extract the key and value, so mind the spelling.
 
-Here are some tips for the terms in general. Sometimes certain terms below might not be preset in my choice of subset for tuning.
+Here are some tips for the terms in general. Sometimes certain terms below might not be present in my choice of subset for tuning.
+
 A key, 'reward.term_name.weight' for example, is a string enclosed by a single quote. The dots inside are used to reconstruct a nested dictionary.
 The value will be mostly float or int, but always comply with the type of the previous configuration.
 Negative reward weights are posssible, terms with negative weights serve as penalty rather than reward.
+
 Note that num_step values in curriculum is in units of simulation steps, which is 24 * learning iterations.
 For example, if num_step_start is 4800, the curriculum starts at 4800/24 = 200 learning iterations.
 When you suggest new num_step values, please make sure they are multiples of 24.
 By common sense, 0 < num_step_start < num_step_end < 24 * max_learning_iterations.
-You are not obliged to change all values. If a certain value was good in the previous run, you can keep it as it is.
+
+Some curriculum terms are activated and deactivated by performance, and by performance I mean value of a specific reward term linked to the curriculum term.
+If performance_low is 0.8, it means the curriculum term will start when the value of the specific reward term is greater than 0.8.
+If performance_high is 0.9, it means the curriculum term will stop when the value of the specific reward term is greater than 0.9.
+If performance never reaches 0.8, this curriculum term will never even start.
+Therefore, your choice of performance_low and performance_high should be reachable during training.
+A good heuristic is 0 < performance_low < performance_high < 0.7
+
+You are not obliged to change all values. If a certain value looks good in the previous run, you can keep it as it is.
 If training is not going well, you are encouraged to make wild guesses.
 """
 
@@ -178,7 +189,7 @@ If you think certain codes are not relevant to learning, such as robot data or v
 
 Your summary should include:
 - Each reward term, how it is computed and its physical meaning (plus its numerical range before weight is multiplied if you deem it relevant)
-- Each curriculum term, parameters, terms that are influenced by this curriculum and its physical meaning
+- Each curriculum term, parameters, other terms that are influenced by this curriculum and its physical meaning
 - Components relevant to domain randomization
 - The overarching structure of the environment that is relevant to learning
 - how different reward terms provide dense rewards to facilitate learning of the ultimate task  

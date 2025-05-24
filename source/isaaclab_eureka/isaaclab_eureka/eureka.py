@@ -431,9 +431,30 @@ class Eureka:
                         f"Task solved with success metric: {best_run_results['success_metric']}"
                     )
                     break
-                user_prompt = (results[best_run_idx]["user_prompt"] +
-                                MULTIPLE_SUGGESTIONS_INSTRUCTION.format(num_parallel_runs=self._num_processes)
-                                + MULTIPLE_SUGGESTIONS_EXAMPLE if self._num_processes > 1 else results[best_run_idx]["user_prompt"])
+                best_prompt = (
+                    "This is the best configuration and its training result from the last iteration:\n\n"
+                    + results[best_run_idx]["user_prompt"]
+                )
+
+                # Extract all other (non-best) prompts
+                other_prompts = []
+                for i, res in enumerate(results):
+                    if i != best_run_idx:
+                        other_prompts.append(f"Config {i+1}:\n" + res["user_prompt"])
+
+                other_prompts_text = (
+                    "\n\nThese are other configurations and their training results:\n\n"
+                    + "\n\n".join(other_prompts)
+                    if other_prompts
+                    else ""
+                )
+
+                # Final prompt assembly
+                user_prompt = (
+                    best_prompt
+                    + other_prompts_text
+                    + MULTIPLE_SUGGESTIONS_INSTRUCTION.format(num_parallel_runs=self._num_processes)
+                    + MULTIPLE_SUGGESTIONS_EXAMPLE if self._num_processes > 1 else best_prompt)
                 self._log_conversation()
         except Exception as e:
             print(f"An error occurred during the Eureka training loop {iter}:")

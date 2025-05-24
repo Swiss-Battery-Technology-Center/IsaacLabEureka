@@ -1,4 +1,5 @@
 # task success metric for unscrew task
+# now using all environments, not just env-ids
 import torch
 def compute_success_metric(self, env_ids):
     object = self.scene["object"]
@@ -19,7 +20,7 @@ def compute_success_metric(self, env_ids):
     ee_pos_w = ee_frame.data.target_pos_w[..., 0, :]                   # (num_envs, 3)
 
     # 🔹 Distance between EE and screw position
-    dist = torch.norm(ee_pos_w[env_ids] - object_pos_w[env_ids], dim=1)
+    dist = torch.norm(ee_pos_w[:] - object_pos_w[:], dim=1)
 
     step = (torch.tanh((dist - offset) / sigma) + 1.0) * 0.5
 

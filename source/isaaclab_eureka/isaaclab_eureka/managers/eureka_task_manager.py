@@ -252,8 +252,9 @@ class EurekaTaskManager:
         for _ in range(self._num_processes):
             idx, result = self._results_queue.get()
             results[idx] = result
+            logging.info(f"Pulled result {idx}")
         print("PULLING FROM RESULTS QUEUE COMPLETE")
-        logging.info(f"Pulled results from results queue")
+        logging.info(f"Pulled all results from results queue")
         return results
 
     def _worker(self, idx: int, rewards_queue: multiprocessing.Queue):
@@ -499,9 +500,6 @@ class EurekaTaskManager:
                         self._run_training()
                         print(f"Iter {self._eureka_iter} string {self._idx}  RUN TRAINING COMPLETE")
                         # this line will not run if training fails, so run it in except block as well
-                        print(f"Iter {self._eureka_iter} string {self._idx} RESETTING ALL ENVS")
-                        self._reset_all_envs()
-                        print(f"Iter {self._eureka_iter} string {self._idx} RESET ALL ENVS COMPLETE")
                     result = {
                         "success": TrainingStatus.SUCCESS, 
                         "log_dir": self._log_dir
@@ -513,13 +511,10 @@ class EurekaTaskManager:
                         "exception": traceback.format_exc(),
 
                     }
-                    self._reset_all_envs()
                     print(traceback.format_exc())
                 except Exception as e:
                     # torch.cuda.empty_cache()
                     print(f"Iter {self._eureka_iter} string {self._idx} TRAINING CRASHED, RESETTING ALL ENVS")
-                    self._reset_all_envs()
-                    print(f"Iter {self._eureka_iter} string {self._idx} RESET ALL ENVS COMPLETE")
                     result = {
                         "success": TrainingStatus.CRASH,
                         "log_dir": self._log_dir,
@@ -527,6 +522,10 @@ class EurekaTaskManager:
                     }
 
                     print(traceback.format_exc())
+                finally:
+                    print(f"Iter {self._eureka_iter} string {self._idx} RESETTING ALL ENVS")
+                    self._reset_all_envs()
+                    print(f"Iter {self._eureka_iter} string {self._idx} RESET ALL ENVS COMPLETE")
             else:
                 # new_weights_string = "", to intentionally skip training
                 print(f"Iter {self._eureka_iter} string {self._idx} INTENTIONALLY SKIPPED TRAINING.")
@@ -563,7 +562,7 @@ class EurekaTaskManager:
         curriculum_dict = {}
         for name, cfg in zip(cm._term_names, cm._term_cfgs):
             for key, val in cfg.params.items():
-                if key == "weight" or "num_steps" in key:
+                if key == "weight" or "num_steps" in key or "performance" in key:
                     curriculum_key = f"curriculum.{name}.{key}"
                     curriculum_dict[curriculum_key] = val
 
