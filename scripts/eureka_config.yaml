@@ -22,7 +22,7 @@ use_cache: True # True to use cached summary of env source code, False to read f
 
 # IsaacLab related arguments
 num_envs: 1024 # choose appropriate value for task, 1024 for unscrew/lift
-max_training_iterations: 100 # RL learning iterations, 800 for lift, 1300 for unscrew
+max_training_iterations: 1500 # RL learning iterations, 800 for lift, 1300 for unscrew
 feedback_subsampling: 10 # adaptive to max learning iterations, 10 will sample 10 times during a full RL training, 20 will sample 20 times
 rl_library: "rsl_rl" # "rsl_rl" , "skrl" supported
 video: False

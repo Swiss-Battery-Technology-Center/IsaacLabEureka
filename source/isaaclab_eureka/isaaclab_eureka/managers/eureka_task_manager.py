@@ -371,7 +371,10 @@ class EurekaTaskManager:
             env.reward_manager = RewardManager(original_cfg.rewards, env)
         except Exception as e:
             print(f"[ERROR] Failed to make a new reward manager: {e}")
-
+        finally:
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
         print(f"[INFO] Reset all envs and restored original cfg.")
 
     def _prepare_eureka_environment(self, get_rewards_method_as_string: str):
@@ -479,7 +482,7 @@ class EurekaTaskManager:
                         print(f"Iter {self._eureka_iter} string {self._idx}  PREPARE EUREKA ENVIRONMENT RESET WEIGHTS COMPLETE")
                     self._prepare_eureka_environment_reset_idx()
                     print(f"Iter {self._eureka_iter} string {self._idx}  PREPARE EUREKA ENVIRONMENT RESET IDX COMPLETE")
-                    context = MuteOutput() if self._idx > 0 else nullcontext()
+                    context = MuteOutput() if self._idx > 5 else nullcontext()
                     with context:
                         if self._eureka_task == "ppo_tuning":
                             try:
@@ -533,9 +536,6 @@ class EurekaTaskManager:
                     "success": TrainingStatus.SKIPPED,
                 }
             # NOT SURE ABOUT THIS EMPTY_CACHE()...
-            # import torch
-            # print(f"PROCESS {self._idx} EMPTYING CUDA CACHE")
-            # torch.cuda.empty_cache()
             result["prev_config"] = new_weights_string # should I use prev_config for reward_weight_tuning?
             self._results_queue.put((self._idx, result))
             print(f"Iter {self._eureka_iter} string {self._idx} PUSHING TO RESULTS QUEUE COMPLETE")

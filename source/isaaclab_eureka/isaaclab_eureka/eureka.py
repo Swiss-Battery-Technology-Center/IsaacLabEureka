@@ -431,6 +431,7 @@ class Eureka:
                         f"Task solved with success metric: {best_run_results['success_metric']}"
                     )
                     break
+
                 best_prompt = (
                     "This is the best configuration and its training result from the last iteration:\n\n"
                     + results[best_run_idx]["user_prompt"]
@@ -440,7 +441,7 @@ class Eureka:
                 other_prompts = []
                 for i, res in enumerate(results):
                     if i != best_run_idx:
-                        other_prompts.append(f"Config {i+1}:\n" + res["user_prompt"])
+                        other_prompts.append(f"Config {i+1}:\n" + res["prev_config"] + "\n" + res.get("exception", res["eureka_task_feedback"]) + "\n\n")
 
                 other_prompts_text = (
                     "\n\nThese are other configurations and their training results:\n\n"
@@ -833,7 +834,7 @@ class Eureka:
                         )
                         + "Using this configuration: \n" +result["prev_config"] + "\n\n"
                         + eureka_task_feedback
-                        + WEIGHT_TUNING_TASK_SUCCESS_POST_FEEDBACK_PROMPT
+                         + WEIGHT_TUNING_TASK_SUCCESS_POST_FEEDBACK_PROMPT
                     )
                 if self._task_manager._eureka_task == "ppo_tuning":
                     user_feedback_prompt = (
@@ -842,7 +843,7 @@ class Eureka:
                         )
                         + result["prev_config"] + "\n\n"
                         + eureka_task_feedback
-                        + PPO_TUNING_TASK_SUCCESS_POST_FEEDBACK_PROMPT
+                         + PPO_TUNING_TASK_SUCCESS_POST_FEEDBACK_PROMPT
                     )
             if result["success"] == TrainingStatus.CRASH:
                 if self._task_manager._eureka_task == "reward_weight_tuning":
