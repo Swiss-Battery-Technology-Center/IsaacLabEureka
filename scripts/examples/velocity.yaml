@@ -1,6 +1,6 @@
 # all the configuration parameters for eureka
 
-task: "Isaac-Velocity-Flat-Anymal-B-v0" # "SBTC-Lift-Cube-Franka-OSC-v0" "SBTC-Unscrew-Franka-OSC-v0"
+task: "	Isaac-Velocity-Flat-Anymal-B-v0" # "SBTC-Lift-Cube-Franka-OSC-v0" "SBTC-Unscrew-Franka-OSC-v0"
 
 # eureka parallel runs for evolutionary search, at each iteration
 # under the hood it runs sequentially

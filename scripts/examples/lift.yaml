@@ -1,6 +1,6 @@
 # all the configuration parameters for eureka
 
-task: "Isaac-Velocity-Flat-Anymal-B-v0" # "SBTC-Lift-Cube-Franka-OSC-v0" "SBTC-Unscrew-Franka-OSC-v0"
+task: "Isaac-Lift-Cube-Franka-v0" # "SBTC-Lift-Cube-Franka-OSC-v0" "SBTC-Unscrew-Franka-OSC-v0"
 
 # eureka parallel runs for evolutionary search, at each iteration
 # under the hood it runs sequentially
@@ -11,7 +11,7 @@ resume:
   enabled: False # True if you want to resume from a previous run, False if fresh start
   prev_iterations_path: "" # path to desired eureka_iterations.txt file(including filename!), only for resume = True
 
-max_eureka_iterations: 1 # one iteration consists of full RL training + getting a new reward/ppo tuning from llm
+max_eureka_iterations: 2 # one iteration consists of full RL training + getting a new reward/ppo tuning from llm
 eureka_task: "reward_weight_tuning" # "ppo_tuning" or "reward_weight_tuning"
 warmstart: True # True if using oracle tuning found by experts at SBTC as initial weights
 
@@ -21,8 +21,8 @@ temperature: 1
 use_cache: True # True to use cached summary of env source code, False to read fresh
 
 # IsaacLab related arguments
-num_envs: 1024 # choose appropriate value for task, 1024 for unscrew/lift
-max_training_iterations: 600 # RL learning iterations, 800 for lift, 1300 for unscrew
+num_envs: 128 # choose appropriate value for task, 1024 for unscrew/lift
+max_training_iterations: 200 # RL learning iterations, 800 for lift, 1300 for unscrew
 feedback_subsampling: 10 # adaptive to max learning iterations, 10 will sample 10 times during a full RL training, 20 will sample 20 times
 rl_library: "rsl_rl" # "rsl_rl" , "skrl" supported
 video: False
@@ -30,15 +30,12 @@ video: False
 
 # for reward/curriculum tuning, unscrew
 parameters_to_tune: 
-  - 'reward.track_lin_vel_xy_exp.weight'
-  - 'reward.track_ang_vel_z_exp.weight'
-  - 'reward.dof_torques_l2.weight'
-  - 'reward.dof_acc_l2.weight'
-  - 'reward.action_rate_l2.weight'
-  - 'reward.feet_air_time.weight'
-  - 'reward.undesired_contacts.weight'
-  - 'reward.flat_orientation_l2.weight'
-  - 'reward.dof_pos_limits.weight'
+  - 'reward.reaching_object.weight'
+  - 'reward.lifting_object.weight'
+  - 'reward.object_goal_tracking.weight'
+  - 'reward.object_goal_tracking_fine_grained.weight'
+  - 'reward.action_rate.weight'
+  - 'reward.joint_vel.weight'
 
 
 

@@ -18,7 +18,6 @@ from isaaclab_eureka.config import (
     TASK_SUCCESS_POST_FEEDBACK_PROMPT,
     TASK_SUCCESS_PRE_FEEDBACK_PROMPT,
     TASKS_CFG,
-    TASK_SUCCESS_REWARD_NAME_DICT,
     MANAGER_BASED_WEIGHT_TUNING_TASK_PROMPT,
     MANAGER_BASED_PPO_TUNING_TASK_PROMPT,
     MANAGER_BASED_WEIGHT_TUNING_INITIAL_PROMPT,
@@ -127,10 +126,6 @@ class Eureka:
         self._feedback_subsampling = feedback_subsampling
         self._num_processes = num_parallel_runs if env_type == "manager_based" else 1
         self._success_metric_string = success_metric_string
-        if env_type == "manager_based":
-            self.task_success_reward_name = TASK_SUCCESS_REWARD_NAME_DICT[task]
-        else:
-            self.task_success_reward_name = None
         self._resume = resume
         self._use_cache = use_cache
         self._single_run = single_run
@@ -346,9 +341,9 @@ class Eureka:
         gpt_weight_strings = [None]*self._num_processes
         llm_outputs = None
         raw_output = None
-
+        iter = 0
         try: 
-            for iter in range(max_eureka_iterations):
+            while iter < max_eureka_iterations:
 
                 print(f"\n{'#' * 20} Running Eureka Iteration {iter} {'#' * 20} \n")
                 logging.info(f"Running Eureka Iteration {iter}")
@@ -457,6 +452,10 @@ class Eureka:
                     + MULTIPLE_SUGGESTIONS_INSTRUCTION.format(num_parallel_runs=self._num_processes)
                     + MULTIPLE_SUGGESTIONS_EXAMPLE if self._num_processes > 1 else best_prompt)
                 self._log_conversation()
+                # if there's a string format error then do not increment the iteration
+                if any(result["success"] == TrainingStatus.FORMAT_ERROR for result in results):
+                    continue 
+                iter += 1
         except Exception as e:
             print(f"An error occurred during the Eureka training loop {iter}:")
             print(e)
@@ -598,11 +597,12 @@ class Eureka:
             metric_mean = sum(metric_data) / len(metric_data)
             # Best metric is the one closest to the target
             if "Eureka/success_metric" in metric_name:
-                metric_best = metric_data[
-                    np.abs(
-                        np.array(metric_data) - self._success_metric_to_win
-                    ).argmin()
-                ]
+                # metric_best = metric_data[
+                #     np.abs(
+                #         np.array(metric_data) - self._success_metric_to_win
+                #     ).argmin()
+                # ]
+                metric_best = metric_data[-1] # use the last value
                 success_metric_max = metric_best
             data_string = [
                 f"{data:.2f}" for data in metric_data[::adaptive_feedback_subsampling]

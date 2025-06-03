@@ -81,7 +81,13 @@ def _reset_idx(self, env_ids):
     self.extras["log"].update(extras)
 """
 
-
+ENV_ID_TO_RL_TASK = {"Isaac-Humanoid-v0": "humanoid",
+                  "Isaac-Ant-v0": "ant",
+                  "Isaac-Cartpole-v0": "cartpole",
+                "Isaac-Reach-Franka-v0": "reach",
+                "Isaac-Lift-Cube-Franka-v0": "lift",
+                "Isaac-Open-Drawer-Franka-v0": "cabinet",
+                "Isaac-Velocity-Flat-Anymal-B-v0": "velocity"}
 
 class EurekaTaskManager:
     """Manages the set-up and training of a task using LLM-generated reward functions.
@@ -137,6 +143,13 @@ class EurekaTaskManager:
         self._video = video
         match = re.search(r"SBTC-([A-Za-z]+)", task)
         rl_task_type = match.group(1).lower() if match else ""
+        self._is_sbtc_task = bool(rl_task_type)  # True if task is a SBTC task
+        if not self._is_sbtc_task:
+            try:
+                rl_task_type = ENV_ID_TO_RL_TASK[task]
+            except KeyError:
+                raise ValueError(f"IsaacLab Task {task} is not supported.")
+
         self._rl_task_type = rl_task_type # "lift", "unscrew", ...
         self._processes = dict()
         # Used to communicate the reward functions to the processes
@@ -902,6 +915,8 @@ class EurekaTaskManager:
             raise Exception(f"framework {framework} is not supported yet.")
 
     def read_env_source_code_smart(self):
+        if not self._is_sbtc_task:
+            return self._read_isaac_env_source_code_smart()
         print("TASK MANAGER: READ ENV SOURCE CODE SMART")
         base_dir = "/workspace/isaaclab/source/isaaclab_tasks/isaaclab_tasks/sbtc_tasks/manager_based"
 
@@ -928,6 +943,60 @@ class EurekaTaskManager:
             all_text += f"\n\n##### === {group.upper()} FUNCTIONS === #####\n"
             for name, src in funcs.items():
                 all_text += f"\n=== {name} ===\n{src}\n"
+        intro = "Here is environment source code\n\n"
+        return intro + all_text
+
+    def _read_isaac_env_source_code_smart(self):
+        print("TASK MANAGER: READ ISAAC ENV SOURCE CODE SMART")
+        
+        base_dir = "/workspace/isaaclab/source/isaaclab_tasks/isaaclab_tasks/manager_based"
+        category_folders = ["classic", "locomotion", "manipulation", "navigation"]
+        
+        found_env_cfg = None
+        mdp_module_path = None
+        task_name = self._rl_task_type  # e.g., "lift", "ant", "cartpole", etc.
+
+        # Search through categories for the task folder
+        for category in category_folders:
+            category_path = os.path.join(base_dir, category)
+            if not os.path.isdir(category_path):
+                continue
+            task_path = os.path.join(category_path, task_name)
+            if not os.path.isdir(task_path):
+                continue
+            # Find env_cfg file (like lift_env_cfg.py, cartpole_env_cfg.py, etc.)
+            for file in os.listdir(task_path):
+                if file.endswith("_env_cfg.py") and task_name in file:
+                    found_env_cfg = os.path.join(task_path, file)
+                    mdp_module_path = f"isaaclab_tasks.manager_based.{category}.{task_name}.mdp"
+                    break
+            if found_env_cfg:
+                break
+        
+        if not found_env_cfg:
+            raise FileNotFoundError(f"Could not locate environment config file for task: {task_name}")
+        
+        # === Load raw env_cfg.py ===
+        with open(found_env_cfg, "r", encoding="utf-8") as f:
+            cfg_source = f.read()
+        
+        from isaaclab_eureka.utils import extract_func_sources_from_cfg_source
+
+        # === Extract function source code ===
+        func_sources = extract_func_sources_from_cfg_source(
+            cfg_path=found_env_cfg,
+            mdp_module_path=mdp_module_path,
+        )
+
+        # === Compose full context text ===
+        all_text = f"##### === {task_name.upper()} ENV CONFIG === #####\n\n"
+        all_text += cfg_source + "\n"
+
+        for group, funcs in func_sources.items():
+            all_text += f"\n\n##### === {group.upper()} FUNCTIONS === #####\n"
+            for name, src in funcs.items():
+                all_text += f"\n=== {name} ===\n{src}\n"
+        
         intro = "Here is environment source code\n\n"
         return intro + all_text
 

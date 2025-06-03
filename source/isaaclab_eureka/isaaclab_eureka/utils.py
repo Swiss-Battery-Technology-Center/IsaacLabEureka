@@ -177,21 +177,28 @@ def extract_func_sources_from_cfg_source(cfg_path: str, mdp_module_path: str) ->
     cfg_dir = os.path.dirname(os.path.abspath(cfg_path))
     mdp_dir = os.path.abspath(os.path.join(cfg_dir, "..", "mdp"))
     sbtc_utils_path = os.path.join(mdp_dir, "utils.py")
-    sbtc_utils_map = load_functions_from_file(sbtc_utils_path)
+    if os.path.isfile(sbtc_utils_path):
+        sbtc_utils_map = load_functions_from_file(sbtc_utils_path)
+    else:
+        sbtc_utils_map = {}
 
     try:
         sys.path.append("/workspace/isaaclab/source")
         mdp_module = importlib.import_module(mdp_module_path)
     except ImportError as e:
-        raise ImportError(f"Failed to import mdp module '{mdp_module_path}': {e}")
+        mdp_module=None
 
+    default_isaaclab_mdp_module = importlib.import_module("isaaclab.envs.mdp")
     visited = set()
     grouped_sources = {k: {} for k in grouped_funcs}
 
     for group, func_names in grouped_funcs.items():
         for func_name in sorted(func_names):
             try:
-                func_obj = getattr(mdp_module, func_name)
+                try:
+                    func_obj = getattr(mdp_module, func_name)
+                except Exception:
+                    func_obj = getattr(default_isaaclab_mdp_module, func_name)
                 src = extract_function_recursively(func_obj, visited, sbtc_utils_map)
                 grouped_sources[group][func_name] = src
             except Exception as e:

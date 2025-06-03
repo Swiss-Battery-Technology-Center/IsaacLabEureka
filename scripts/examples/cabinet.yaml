@@ -1,6 +1,4 @@
-# all the configuration parameters for eureka
-
-task: "Isaac-Velocity-Flat-Anymal-B-v0" # "SBTC-Lift-Cube-Franka-OSC-v0" "SBTC-Unscrew-Franka-OSC-v0"
+task: "Isaac-Open-Drawer-Franka-v0" # "SBTC-Lift-Cube-Franka-OSC-v0" "SBTC-Unscrew-Franka-OSC-v0"
 
 # eureka parallel runs for evolutionary search, at each iteration
 # under the hood it runs sequentially
@@ -11,7 +9,7 @@ resume:
   enabled: False # True if you want to resume from a previous run, False if fresh start
   prev_iterations_path: "" # path to desired eureka_iterations.txt file(including filename!), only for resume = True
 
-max_eureka_iterations: 1 # one iteration consists of full RL training + getting a new reward/ppo tuning from llm
+max_eureka_iterations: 2 # one iteration consists of full RL training + getting a new reward/ppo tuning from llm
 eureka_task: "reward_weight_tuning" # "ppo_tuning" or "reward_weight_tuning"
 warmstart: True # True if using oracle tuning found by experts at SBTC as initial weights
 
@@ -30,22 +28,16 @@ video: False
 
 # for reward/curriculum tuning, unscrew
 parameters_to_tune: 
-  - 'reward.track_lin_vel_xy_exp.weight'
-  - 'reward.track_ang_vel_z_exp.weight'
-  - 'reward.dof_torques_l2.weight'
-  - 'reward.dof_acc_l2.weight'
+  - 'reward.approach_ee_handle.weight'
+  - 'reward.align_ee_handle.weight'
+  - 'reward.approach_gripper_handle.weight'
+  - 'reward.align_grasp_around_handle.weight'
+  - 'reward.grasp_handle.weight'
+  - 'reward.open_drawer_bonus.weight'
+  - 'reward.multi_stage_open_drawer.weight'
   - 'reward.action_rate_l2.weight'
-  - 'reward.feet_air_time.weight'
-  - 'reward.undesired_contacts.weight'
-  - 'reward.flat_orientation_l2.weight'
-  - 'reward.dof_pos_limits.weight'
+  - 'reward.joint_vel.weight'
 
-
-
-
-# Temporary fix, set True if you want no llm, one process, one training, use tuning from source code
-# just like reinforcement_learning/rsl_rl/train.py
-# still records training result, tuning config, Eureka metrics, etc
-single_run: False
+single_run: True
 
 env_type: "manager_based" # "manager_based" or "direct"
