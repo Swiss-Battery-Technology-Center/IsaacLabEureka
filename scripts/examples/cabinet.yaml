@@ -4,14 +4,15 @@ task: "Isaac-Open-Drawer-Franka-v0" # "SBTC-Lift-Cube-Franka-OSC-v0" "SBTC-Unscr
 # under the hood it runs sequentially
 # supported only for manager-based tuning
 num_parallel_runs: 2
-
+random_start: True # True if you want to start with random tuning, False if you want to use tuning from source code
+random_evolution: False
 resume:
   enabled: False # True if you want to resume from a previous run, False if fresh start
   prev_iterations_path: "" # path to desired eureka_iterations.txt file(including filename!), only for resume = True
 
 max_eureka_iterations: 2 # one iteration consists of full RL training + getting a new reward/ppo tuning from llm
 eureka_task: "reward_weight_tuning" # "ppo_tuning" or "reward_weight_tuning"
-warmstart: True # True if using oracle tuning found by experts at SBTC as initial weights
+env_seed: 42
 
 # LLM-related arguments
 gpt_model: "deepseek/deepseek-r1:free" # "deepseek/deepseek-chat-v3-0324:free" or "google/gemma-3-12b-it:free", any free model from https://openrouter.ai/models?max_price=0

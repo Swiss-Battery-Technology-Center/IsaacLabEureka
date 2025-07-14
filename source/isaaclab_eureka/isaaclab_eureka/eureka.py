@@ -57,12 +57,12 @@ class Eureka:
         env_type: str = "",
         eureka_task: str = "reward_weight_tuning",
         parameters_to_tune: list[str] = [],
-        warmstart: bool = False,
         num_envs: int = 1024,
         resume: dict = {'enabled':False, 'resume_path': ""},
         use_cache: bool = True,
-        single_run: bool = False,
         video: bool = False,
+        random_start: bool = False,
+        mode: str = "eureka"
     ):
         """Initialize the Eureka class.
 
@@ -80,27 +80,15 @@ class Eureka:
         """
         # logging comes first
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        if warmstart:
-            self._log_dir = os.path.join(
-                EUREKA_ROOT_DIR,
-                "logs",
-                "eureka",
-                task,
-                eureka_task,
-                "warmstart",
-                timestamp,
-            )
+        self._log_dir = os.path.join(
+            EUREKA_ROOT_DIR,
+            "logs",
+            task,
+            mode, 
+            f"seed_{env_seed}",
+            timestamp,
+        )
 
-        else:
-            self._log_dir = os.path.join(
-                EUREKA_ROOT_DIR,
-                "logs",
-                "eureka",
-                task,
-                eureka_task,
-                "randstart",
-                timestamp,
-            )
         os.makedirs(self._log_dir)
         self._tensorboard_writer = TensorboardSummaryWriter(
             log_dir=self._log_dir, flush_secs=10
@@ -128,7 +116,10 @@ class Eureka:
         self._success_metric_string = success_metric_string
         self._resume = resume
         self._use_cache = use_cache
-        self._single_run = single_run
+        self._random_start = random_start
+        self._mode = mode
+        self._signed = False  # Used for random evolution mode
+        # self._preference = preference
         print("[INFO]: Setting up the LLM Manager...")
         logging.info("Setting up the LLM Manager...")
         self._llm_manager = LLMManager(
@@ -152,15 +143,20 @@ class Eureka:
             env_type=env_type,
             eureka_task=eureka_task,
             parameters_to_tune=parameters_to_tune,
-            warmstart=warmstart,
             num_envs=num_envs,
             video=video,
+            mode = mode,
         )
 
 
     def run(self, max_eureka_iterations: int):
-        if self._single_run:
+        if "single_run" in self._mode:
             self.run_single_run()
+        elif "random" in self._mode:
+            self._signed = True is self._mode == "random_signed"
+            self.run_random_evolution(max_eureka_iterations)
+        # elif self._preference:
+        #     self.run_preference(max_eureka_iterations)
         elif self._task_manager.is_manager_based():
             self.run_manager_based(max_eureka_iterations)
         else:
@@ -215,6 +211,7 @@ class Eureka:
             print("CLOSING TASK MANAGER")
             logging.info("CLOSING TASK MANAGER")
             self._task_manager.close()
+
     def run_direct(self, max_eureka_iterations: int):
         """Run the Eureka training loop.
 
@@ -272,6 +269,189 @@ class Eureka:
         self._log_final_results(best_run_results, max_eureka_iterations)
         # Close the task manager
         self._task_manager.close()
+    def run_random_evolution(self, max_eureka_iterations: int):
+        best_run_results = {"success_metric": None}
+        gpt_weight_strings = [None]*self._num_processes
+        llm_outputs = None
+        raw_output = None
+        iter = 0
+        try: 
+            while iter < max_eureka_iterations:
+                print(f"\n{'#' * 20} Running Random Evolution {iter} {'#' * 20} \n")
+                logging.info(f"Running Eureka Iteration {iter}")
+                if iter == 0:
+                    if self._num_processes > 1:
+                        print("FRESH START, RANDOMLY SAMPLING WEIGHTS")
+                        logging.info("FRESH START, RANDOMLY SAMPLING WEIGHTS")
+                        initial_tuning_randomized = randomize_reward_weights(self._task_manager._get_initial_tuning_as_string, self._signed)
+                        if self._random_start:
+                            gpt_weight_strings = generate_multiple_candidates(initial_tuning_randomized, self._num_processes, self._signed)
+                        else:
+                            gpt_weight_strings = generate_multiple_candidates(self._task_manager._get_initial_tuning_as_string, self._num_processes, self._signed)
+                        raw_output = None
+                    else:
+                        # 0th iter single process: just use current config
+                        logging.info("Using current config as the first suggestion")
+                        gpt_weight_strings = [self._task_manager._get_initial_tuning_as_string]
+                        raw_output = ""
+                else:           
+                    # llm gives suggestions based on previous iterations
+                    prev_config = extract_best_config_string(user_prompt)
+                    gpt_weight_strings = generate_multiple_candidates(prev_config, self._num_processes)
+                    raw_output = None
+
+                print('STARTING TASK MANAGER TRAIN')
+                logging.info('STARTING TASK MANAGER TRAIN')
+                print(f"GPT WEIGHT STRINGS: \n{gpt_weight_strings}")
+                logging.info(f"GPT WEIGHT STRINGS: \n{gpt_weight_strings}")
+                results = self._task_manager.train(gpt_weight_strings)
+                print('TASK MANAGER TRAIN COMPLETE')
+                logging.info('TASK MANAGER TRAIN COMPLETE')
+                # bad fix, gpt_weight_strings is empty at iter==0 so use prev_weights_str instead
+                # Evaluate the results
+                # llm_outputs["raw_outputs"] is the raw response string
+
+                results, best_run_results, best_run_idx = (
+                    self.evaluate_results_weight_tuning(
+                        results, best_run_results
+                    )
+                )
+                logging.info(f"Evaluation complete")
+                self._log_iteration_results(iter, results, raw_output)
+                logging.info(f"Iteration results saved")
+
+                if (
+                    best_run_results["success_metric"] is not None
+                    and np.abs(
+                        best_run_results["success_metric"] - self._success_metric_to_win
+                    )
+                    < self._success_metric_tolerance
+                ):
+                    print(
+                        f"Task solved with success metric: {best_run_results['success_metric']}"
+                    )
+                    break
+
+                best_prompt = (
+                    "This is the best configuration and its training result from the last iteration:\n\n"
+                    + results[best_run_idx]["user_prompt"]
+                )
+
+                # Final prompt assembly
+                user_prompt = best_prompt
+                self._log_conversation()
+                # if there's a string format error then do not increment the iteration
+                if any(result["success"] == TrainingStatus.FORMAT_ERROR for result in results):
+                    continue 
+                iter += 1
+        except Exception as e:
+            print(f"An error occurred during the Eureka training loop {iter}:")
+            print(e)
+            traceback.print_exc()
+            logging.error(f"An error occurred during the Eureka training loop {iter}:\n{traceback.format_exc()}") 
+
+            
+            # Handle the error as needed
+                
+        finally:
+            self._log_final_results(best_run_results, iter)
+            self._log_conversation()
+            # Close the task manager
+            print("CLOSING TASK MANAGER")
+            logging.info("CLOSING TASK MANAGER")
+            self._task_manager.close()
+
+    def run_preference(self, max_eureka_iterations: int):
+        best_run_results = {"success_metric": None}
+        gpt_weight_strings = [None]*self._num_processes
+        llm_outputs = None
+        raw_output = None
+        iter = 0
+        try: 
+            while iter < max_eureka_iterations:
+                print(f"\n{'#' * 20} Running Preference {iter} {'#' * 20} \n")
+                logging.info(f"Running Preference{iter}")
+                if iter == 0:
+                    if self._num_processes > 1:
+                        print("FRESH START, RANDOMLY SAMPLING WEIGHTS")
+                        logging.info("FRESH START, RANDOMLY SAMPLING WEIGHTS")
+                        initial_tuning_randomized = randomize_reward_weights(self._task_manager._get_initial_tuning_as_string)
+                        if self._random_start:
+                            gpt_weight_strings = generate_multiple_candidates(initial_tuning_randomized, self._num_processes)
+                        else:
+                            gpt_weight_strings = generate_multiple_candidates(self._task_manager._get_initial_tuning_as_string, self._num_processes)
+                        raw_output = None
+                    else:
+                        # 0th iter single process: just use current config
+                        logging.info("Using current config as the first suggestion")
+                        gpt_weight_strings = [self._task_manager._get_initial_tuning_as_string]
+                        raw_output = ""
+                else:           
+                    # llm gives suggestions based on previous iterations
+                    prev_config = extract_best_config_string(user_prompt)
+                    gpt_weight_strings = generate_multiple_candidates(prev_config, self._num_processes)
+                    raw_output = None
+
+                print('STARTING TASK MANAGER TRAIN')
+                logging.info('STARTING TASK MANAGER TRAIN')
+                print(f"GPT WEIGHT STRINGS: \n{gpt_weight_strings}")
+                logging.info(f"GPT WEIGHT STRINGS: \n{gpt_weight_strings}")
+                results = self._task_manager.train(gpt_weight_strings)
+                print('TASK MANAGER TRAIN COMPLETE')
+                logging.info('TASK MANAGER TRAIN COMPLETE')
+                # bad fix, gpt_weight_strings is empty at iter==0 so use prev_weights_str instead
+                # Evaluate the results
+                # llm_outputs["raw_outputs"] is the raw response string
+
+                results, best_run_results, best_run_idx = (
+                    self.evaluate_results_weight_tuning(
+                        results, best_run_results
+                    )
+                )
+                logging.info(f"Evaluation complete")
+                self._log_iteration_results(iter, results, raw_output)
+                logging.info(f"Iteration results saved")
+
+                if (
+                    best_run_results["success_metric"] is not None
+                    and np.abs(
+                        best_run_results["success_metric"] - self._success_metric_to_win
+                    )
+                    < self._success_metric_tolerance
+                ):
+                    print(
+                        f"Task solved with success metric: {best_run_results['success_metric']}"
+                    )
+                    break
+
+                best_prompt = (
+                    "This is the best configuration and its training result from the last iteration:\n\n"
+                    + results[best_run_idx]["user_prompt"]
+                )
+
+                # Final prompt assembly
+                user_prompt = best_prompt
+                self._log_conversation()
+                # if there's a string format error then do not increment the iteration
+                if any(result["success"] == TrainingStatus.FORMAT_ERROR for result in results):
+                    continue 
+                iter += 1
+        except Exception as e:
+            print(f"An error occurred during the Eureka training loop {iter}:")
+            print(e)
+            traceback.print_exc()
+            logging.error(f"An error occurred during the Eureka training loop {iter}:\n{traceback.format_exc()}") 
+
+            
+            # Handle the error as needed
+                
+        finally:
+            self._log_final_results(best_run_results, iter)
+            self._log_conversation()
+            # Close the task manager
+            print("CLOSING TASK MANAGER")
+            logging.info("CLOSING TASK MANAGER")
+            self._task_manager.close()
 
     def run_manager_based(self, max_eureka_iterations: int):
         """Run the Eureka training loop.
@@ -303,7 +483,7 @@ class Eureka:
                                                                          smart_context_code_string,
                                                                          EUREKA_ROOT_DIR,
                                                                          use_cache=use_cache)
-            self._llm_manager.append_assistant_prompt(context_code_summary)
+            self._llm_manager.append_user_prompt(context_code_summary)
             print("CONTEXT CODE SUMMARY TO ASSISTANT PROMPT COMPLETE")
             logging.info("CONTEXT CODE SUMMARY TO ASSISTANT PROMPT COMPLETE")
 
@@ -315,7 +495,7 @@ class Eureka:
                                                                          ppo_code_string,
                                                                          EUREKA_ROOT_DIR,
                                                                          use_cache=use_cache)
-            self._llm_manager.append_assistant_prompt(ppo_code_summary)
+            self._llm_manager.append_user_prompt(ppo_code_summary)
             print("PPO SUMMARY TO ASSISTANT PROMPT COMPLETE")
             logging.info("PPO SUMMARY TO ASSISTANT PROMPT COMPLETE")
         
@@ -326,7 +506,7 @@ class Eureka:
                                                                          success_metric_code_string,
                                                                          EUREKA_ROOT_DIR,
                                                                          use_cache=use_cache)
-        self._llm_manager.append_assistant_prompt(success_metric_code_summary)
+        self._llm_manager.append_user_prompt(success_metric_code_summary)
         print("SUCCESS METRIC CODE SUMMARY TO ASSISTANT PROMPT COMPLETE")
         logging.info("SUCCESS METRIC CODE SUMMARY TO ASSISTANT PROMPT COMPLETE")
 
@@ -364,8 +544,12 @@ class Eureka:
                         if self._num_processes > 1:
                             print("FRESH START, POPULATING GPT WEIGHT STRINGS")
                             logging.info("FRESH START, POPULATING GPT WEIGHT STRINGS")
-                            SUGGESTION_PROMPT = f"Here is current configuration. Give me {self._num_processes} suggestion to start evolutionary search with, including current configuration as the first suggestion. You are encouraged to make wild guesses, since this will be the first generation in evolutioary search. Max learning iteration is {self._task_manager._max_training_iterations} learning iterations.\n"
-                            self._llm_manager.append_user_prompt(SUGGESTION_PROMPT + self._task_manager._get_initial_tuning_as_string)
+                            SUGGESTION_PROMPT = f"Here is a random configuration. Give me {self._num_processes} suggestion to start evolutionary search with, including current configuration as the first suggestion. Just make sure that your reward weights have the correct sign(positive or negative, as indicated in context code summary). Max learning iteration is {self._task_manager._max_training_iterations} learning iterations.\n"
+                            initial_tuning_randomized = randomize_reward_weights(self._task_manager._get_initial_tuning_as_string)
+                            if self._random_start:
+                                self._llm_manager.append_user_prompt(SUGGESTION_PROMPT + initial_tuning_randomized)
+                            else:
+                                self._llm_manager.append_user_prompt(SUGGESTION_PROMPT + self._task_manager._get_initial_tuning_as_string)
                             llm_outputs = self._llm_manager.call_llm()
                             print('LLM MANAGER CALLING COMPLETE')
                             logging.info('LLM MANAGER CALLING COMPLETE')    
@@ -605,11 +789,10 @@ class Eureka:
                 metric_best = metric_data[-1] # use the last value
                 success_metric_max = metric_best
             data_string = [
-                f"{data:.2f}" for data in metric_data[::adaptive_feedback_subsampling]
+                f"{data:.3f}" for data in metric_data[::adaptive_feedback_subsampling]
             ]
             feedback_string = (
-                f"{metric_name}: {data_string}, Min: {metric_min:.2f}, Max: {metric_max:.2f}, Mean:"
-                f" {metric_mean:.2f} \n"
+                f"{metric_name}: {data_string}, Min: {metric_min:.3f}, Max: {metric_max:.3f}\n"
             )
             if (
                 "Eureka/success_metric" in data
@@ -651,10 +834,10 @@ class Eureka:
                 if self._resume["enabled"]:
                     f.write(f"Resuming from previous iterations\n")
                     f.write(f"{self._resume['prev_iterations_path']}\n\n")
-                elif self._task_manager._warmstart:
-                    f.write(f"Using Warmstart\n\n")
-                else:
-                    f.write(f"Using Randstart\n\n")
+                if self._random_start:
+                    f.write(f"Using Random Start\n\n")
+
+                f.write(f"Using {self._mode} mode\n\n")
             if raw_output is not None:
                 f.write(f"{'#' * 20} Iteration: {iter} {'#' * 20}\n\n")
                 wrapped_output = textwrap.fill(raw_output, width=150)
@@ -702,10 +885,10 @@ class Eureka:
         if self._resume["enabled"]:
             output += f"Resuming from previous iterations\n"
             output += f"{self._resume['prev_iterations_path']}\n"
-        elif self._task_manager._warmstart:
-            output += f"Using Warmstart\n"
-        else:
-            output += f"Using Randstart\n"
+        if self._random_start:
+            output += f"Using Random Start\n\n"
+
+        output += f"Using {self._mode} mode\n\n"
         if best_run_results["success_metric"] is not None:
             output += f"- Success metric: {best_run_results['success_metric']}\n"
             output += f"- GPT config: {best_run_results['gpt_reward_method']}\n"
@@ -1088,4 +1271,52 @@ def init_eureka_logger(log_dir: str, filename: str = "eureka_debug.log", level=l
         filemode="w",  # overwrite on each run; change to "a" to append
     )
 
+import ast
+import random
+# randomize weights of one string
+def randomize_reward_weights(weight_str, low=-1, high=1, signed=False):
+    weight_dict = ast.literal_eval(weight_str)
 
+    if signed:
+        randomized = {
+            k: random.uniform(0, high) if v > 0 else random.uniform(low, 0)
+            for k, v in weight_dict.items()
+        }
+    else:
+        randomized = {
+            k: random.uniform(low, high)
+            for k in weight_dict
+        }
+
+    return repr(randomized)
+
+def generate_multiple_candidates(best_weight_str, num_samples, low=-1, high=1, signed=False):
+    best_dict = ast.literal_eval(best_weight_str)
+    population = []
+
+    for _ in range(num_samples):
+        if signed:
+            new_weights = {
+                k: random.uniform(0, high) if v > 0 else random.uniform(low, 0)
+                for k, v in best_dict.items()
+            }
+        else:
+            new_weights = {
+                k: random.uniform(low, high)
+                for k in best_dict.keys()
+            }
+        population.append(repr(new_weights))
+
+    return population
+
+import re
+
+def extract_best_config_string(user_prompt):
+    """
+    Extracts the dictionary string that comes right after 'Using this configuration:'.
+    Returns it as a string (including the braces).
+    """
+    match = re.search(r"Using this configuration:\s*(\{.*?\})", user_prompt, re.DOTALL)
+    if match:
+        return match.group(1)
+    return None

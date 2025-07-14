@@ -84,6 +84,7 @@ def _reset_idx(self, env_ids):
 ENV_ID_TO_RL_TASK = {"Isaac-Humanoid-v0": "humanoid",
                   "Isaac-Ant-v0": "ant",
                   "Isaac-Cartpole-v0": "cartpole",
+                  "Isaac-Cartpole-RGB-v0": "cartpole",
                 "Isaac-Reach-Franka-v0": "reach",
                 "Isaac-Lift-Cube-Franka-v0": "lift",
                 "Isaac-Open-Drawer-Franka-v0": "cabinet",
@@ -108,9 +109,9 @@ class EurekaTaskManager:
         env_type: str = "",
         eureka_task: str = "",
         parameters_to_tune: list[str] = [],
-        warmstart: bool = False,
         num_envs: int = 1024,
         video: bool = False,
+        mode: str = "eureka"
     ):
         """Initialize the task manager. Each process will create an independent training run.
 
@@ -137,10 +138,10 @@ class EurekaTaskManager:
             )
         self._eureka_task = eureka_task
         self._parameters_to_tune = parameters_to_tune
-        self._warmstart = warmstart
         self._num_envs = num_envs
         self._skrl_rollout=None
         self._video = video
+        self._mode = mode
         match = re.search(r"SBTC-([A-Za-z]+)", task)
         rl_task_type = match.group(1).lower() if match else ""
         self._is_sbtc_task = bool(rl_task_type)  # True if task is a SBTC task
@@ -725,18 +726,14 @@ class EurekaTaskManager:
             agent_cfg.max_iterations = self._max_training_iterations
 
             log_root_path = os.path.join(
-                EUREKA_ROOT_DIR, "logs", "rl_runs", "rsl_rl_eureka", agent_cfg.experiment_name, self._eureka_task
+                EUREKA_ROOT_DIR, "logs", "rl_runs", "rsl_rl_eureka", agent_cfg.experiment_name, self._mode, f"seed_{self._env_seed}",datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             )
             log_root_path = os.path.abspath(log_root_path)
-            if self._warmstart:
-                log_root_path = os.path.join(log_root_path, "warmstart")
-            else:
-                log_root_path = os.path.join(log_root_path, "randstart")
+
             print(f"[INFO] Logging experiment in directory: {log_root_path}")
             # specify directory for logging runs: {time-stamp}_{run_name}
             log_dir = (
-                datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                + f"_Run-{self._idx}_iter-{self._eureka_iter}"
+                f"Run-{self._idx}_iter-{self._eureka_iter}"
             )
             if agent_cfg.run_name:
                 log_dir += f"_{agent_cfg.run_name}"
@@ -794,13 +791,9 @@ class EurekaTaskManager:
                 "rl_runs",
                 "rl_games_eureka",
                 agent_cfg["params"]["config"]["name"],
-                self._eureka_task,
             )
             log_root_path = os.path.abspath(log_root_path)
-            if self._warmstart:
-                log_root_path = os.path.join(log_root_path, "warmstart")
-            else:
-                log_root_path = os.path.join(log_root_path, "randstart")
+
             print(f"[INFO] Logging experiment in directory: {log_root_path}")
             # specify directory for logging runs
             log_dir = (
@@ -867,13 +860,9 @@ class EurekaTaskManager:
                 "rl_runs",
                 "skrl_eureka",
                 agent_cfg["agent"]["experiment"]["directory"],
-                self._eureka_task,
             )
             log_root_path = os.path.abspath(log_root_path)
-            if self._warmstart:
-                log_root_path = os.path.join(log_root_path, "warmstart")
-            else:
-                log_root_path = os.path.join(log_root_path, "randstart")
+
             print(f"[INFO] Logging experiment in directory: {log_root_path}")
             # specify directory for logging runs: {time-stamp}_{run_name}
             log_dir = (

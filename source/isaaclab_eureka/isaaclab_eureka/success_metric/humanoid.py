@@ -16,4 +16,4 @@ def compute_success_metric(self, env_ids):
     # Average over *all* environments, not just env_ids
     success_metric = progress_ratio.mean()
     
-    return {"success_metric":success_metric}
+    return {"success_metric":success_metric*3} # Scale the metric 3 times for better interpretability

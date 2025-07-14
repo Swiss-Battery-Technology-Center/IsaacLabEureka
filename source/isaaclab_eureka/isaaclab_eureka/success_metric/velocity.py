@@ -2,13 +2,17 @@ import torch
 
 def compute_success_metric(self, env_ids):
     # Config
-    command_name = self.reward_manager.get_term_cfg("track_lin_vel_xy_exp").params["command_name"]
-    asset_cfg = self.reward_manager.get_term_cfg("track_lin_vel_xy_exp").params["asset_cfg"]
-    std_lin = self.reward_manager.get_term_cfg("track_lin_vel_xy_exp").params["std"]
-    std_ang = self.reward_manager.get_term_cfg("track_ang_vel_z_exp").params["std"]
+    term_lin_cfg = self.reward_manager.get_term_cfg("track_lin_vel_xy_exp")
+    term_ang_cfg = self.reward_manager.get_term_cfg("track_ang_vel_z_exp")
 
-    # Get asset
-    asset = self.scene[asset_cfg.name]
+    command_name = term_lin_cfg.params["command_name"]
+    std_lin = term_lin_cfg.params["std"]
+    std_ang = term_ang_cfg.params["std"]
+    asset_cfg = term_lin_cfg.params.get("asset_cfg", None)
+
+    # Default to "robot" if not specified
+    asset_name = asset_cfg.name if asset_cfg else "robot"
+    asset = self.scene[asset_name]  # ✅ Correct way to retrieve the robot
 
     # Compute linear velocity similarity (xy-plane)
     lin_vel_error = torch.sum(
@@ -23,8 +27,11 @@ def compute_success_metric(self, env_ids):
     )
     ang_similarity = torch.exp(-ang_vel_error / std_ang**2)
 
-    # Success metric: average of linear and angular tracking
-    success_metric = 0.5 * (lin_similarity + ang_similarity)
+    # Multiply similarities (range [0, 1])
+    success_metric = (lin_similarity + ang_similarity)/2
 
-    # Average over all environments
-    return success_metric.mean()
+    return {
+        "success_metric": success_metric.mean(),
+        "linear_similarity": lin_similarity.mean(),
+        "angular_similarity": ang_similarity.mean(),
+    }

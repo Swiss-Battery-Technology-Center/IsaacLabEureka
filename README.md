@@ -1,36 +1,59 @@
-## FOR SBTC
+## Eureka parameter tuning for IsaacLab manager based
 
-Go to root repo directory ``/workspace/isaaclab/_isaaclab_eureka``.
+Eureka is a flexibe, automated tuning framework for RL tasks in IsaacLab manager based environment. It provides source code context and training to LLM, and LLM suggests new tunings which are injected back to IsaacLab. After iterations, Eureka returns the best tuning: one that achieves highest success metric. LLM api calls are free. Currently it runs on SBTC tasks(`unscrew`, `lift`) and various default IsaacLab tasks(`cartpole`, `humanoid`, `velocity`, `franka reach`) but can be extended to new tasks. It supports `rsl_rl` and `skrl` library, can tune reward/curriculum/ppo parameters.
 
 - Installation
+
+    Go to root repo directory ``/workspace/isaaclab/_isaaclab_eureka`` of SBTC container.
     ```
     isaaclab --python -m pip install -e source/isaaclab_eureka
     ```
 
-- Export your openrouter key inside container.
+- Save your api key
 
-    Get an api key from [openrouter](https://openrouter.ai/).
-
-    ```
-    echo 'export OPENROUTER_API_KEY="your_openrouter_key"' >> ~/.bashrc
-    source ~/.bashrc
-    ```
-
-- PPO HYPERPARAMETER TUNING, REWARD WEIGHT TUNING
-
-    Set your arguments in `scripts\eureka_config.yaml`. These arguments will be used to instantiate Eureka. 
+    Get an api key from [openrouter](https://openrouter.ai/). 
+    Go to api_keys folder, create `.env.api_keys` and save your key.
     
-    Have a look at `scripts\ppo_tuning_ex.yaml` and `scripts\reward_weight_tuning_ex.yaml`.
+    ```
+    OPENROUTER_API_KEY=your_api_key
+    ```
 
-- HOW TO READ RESULTS
+- How to run
 
-    `_isaaclab_eureka/logs` contain text summaries: metrics, training history, GPT tuning suggestions, GPT reasoning, etc.
+    set relevant parameters in `scripts/eureka_config.yaml` and run `scripts/train.py`.
 
-    `logs/rl_runs` contain actual models. Use Tensorboard to visualize data.
+    - Let `max_eureka_iterations` = X, `num_parallel_runs`=Y.
+    - Eureka will run X iterations. At each iteration, Eureka will get Y different tunings and train Y different policies.
+    - In the end it selects the best one from X*Y policies.
+    - Most of the time, you only need to change `task`, `random_start`, `max_eureka_iterations`, `num_parallel_runs`, `max_training_iterations` and `parameters_to_tune`
+    - for rl library, `rsl_rl` is fully tested, `skrl` is implemented but not tested
+    - for eureka\_task, `reward_weight_tuning` supports reward weight tuning and curriculum tuning. Use `ppo_tuning` exclusively for ppo hyperparameter tuning.
+    - in `parameters_to_tune`, give a list of parameters you want to tune, in nested structure. You can only tune reward/curriculum or ppo, not both jointly. Parameters should be given in format similar to below:
+        - `reward.progress.weight`
+        - `curriculum.reset_robot_joints.performance_low`
+        - `algorithm.use_clipped_value_loss`
+        - `agent.entropy_loss_scale`
+    
+    Note, the parameters should be task and rl library specific.
+    
+    There are example yaml files, such as `examples` folder or `ppo_tuning_ex.yaml`
+
+- Results
+    - inside `logs`, it saves 
+        - `eureka_conversation.txt`: all inputs and outputs of LLM queries
+        - `eureka_iterations.txt`: summary of each policy
+        - `eureka_final_result.txt`: summary of the best policy and token usage. Disregard `price`, we are using free model.
+    - the actual trained policies and tensorboard data are saved in `logs/rl_runs`
+
+- Miscellaneous
+    - Eureka reads source code from specific folder directory to provide LLM with context. Therefore, any newly added task must comply with either default IsaacLab style or SBTC style(in terms of folder names, file names, directory structure, etc)
+    - In detail, instead of giving the raw source code to LLM(which may be too overwhelming), we use a summary of source code(Also LLM-generated). With `use_cache` in `eureka_config.yaml`, you can decide whether to reuse previous summary or regenerate summary(in case you changed prompting strategy)
+    - For each task, you must define a success metric in `success_metric` folder. It allows to have a metric that is independent from reward values which are influenced by tuning. This `compute_success_metric(self, env_ids)` function is dynamically executed and attached to IsaacLab env instance, so you can write it in a similar way to how you write reward functions. For default IsaacLab tasks, you must additionally create a mapping between task name and alias: "Isaac-Cartpole-v0" and "cartpole" for example. It should be done in 'ENV_ID_TO_RL_TASK' of `eureka_task_mmanager.py` and `tasks.py`.
+    - Add new task to `tasks.py`. Disregard the `success_metric` field, just set it to zero. It was used by original Eureka implementation but you could only give one line of string, which is not enough to define complex success metric.
+    - If Eureka run crashed for some reason, you can resume by giving path to previous `eureka_iterations.txt` in `eureka_config.yaml`, although not really used in practice.
 
 
-
-## Overview
+## Overview(from original Eureka)
 
 This repository is an implementation of *[Eureka](https://github.com/eureka-research/Eureka): Human-Level Reward Design via Coding Large Language Models* in Isaac Lab.
 It prompts an LLM to discover and tune reward functions automatically for your specific task.

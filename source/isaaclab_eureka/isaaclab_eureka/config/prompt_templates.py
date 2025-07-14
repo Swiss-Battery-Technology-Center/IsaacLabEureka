@@ -28,20 +28,25 @@ Some helpful tips for writing the reward function code:
 
 MANAGER_BASED_WEIGHT_TUNING_FORMATTING_INSTRUCTIONS = """
 Your new configuraiton string should comply exactly with the structure of the previous configuration.
-The configuration you are given is not full configuration of the environment, but rather a selected subset that I wish to tune.
 Do not add new terms or remove existing terms, comply with the previous configuration.
 It will generally look like:
     {'reward.term_name.weight': value_1, 'curriculum.term_name.param_name': value_2, ...}
 I will use regex pattern of the above structure to extract the keys and values from your response. 
 Use the same keys as the previous configuration, but suggest new values.
-If term name is reset_robot_joints but you say reset_robot_joint in your response, I will not be able to extract the key and value, so mind the spelling.
 
-Here are some tips for the terms in general. Sometimes certain terms below might not be present in my choice of subset for tuning.
+Here are some tips for the terms in general.
 
-A key, 'reward.term_name.weight' for example, is a string enclosed by a single quote. The dots inside are used to reconstruct a nested dictionary.
-The value will be mostly float or int, but always comply with the type of the previous configuration.
-Negative reward weights are posssible, terms with negative weights serve as penalty rather than reward.
+When you suggest new weights, make sure the new weights are reasonable in terms of sign and scale.
+Context code summary includes desired sign and scale of reward weight, so you can use it to guide your choice of weights. 
+For low scale terms, just setting the weight to 0 is okay.
+If the weight for auxillary is zero, agent might still learn something from main rewards. 
+If the weight scale for auxillary is larger than it should be(if a proper scale is 1e-5, then a choice of 0.01 is still a very large value), 
+the agent will game the auxillary shaping term and learn to not move at all, which is definitely undesired.
 
+You are not obliged to change all values. If a certain value looks good in the previous run, you can keep it as it is.
+If training is not going well, you are encouraged to make wild guesses.
+"""
+ADDITIONAL_FOR_CURRICULUM_TUNING ="""
 Note that num_step values in curriculum is in units of simulation steps, which is 24 * learning iterations.
 For example, if num_step_start is 4800, the curriculum starts at 4800/24 = 200 learning iterations.
 When you suggest new num_step values, please make sure they are multiples of 24.
@@ -53,11 +58,7 @@ If performance_high is 0.9, it means the curriculum term will stop when the valu
 If performance never reaches 0.8, this curriculum term will never even start.
 Therefore, your choice of performance_low and performance_high should be reachable during training.
 A good heuristic is 0 < performance_low < performance_high < 0.7
-
-You are not obliged to change all values. If a certain value looks good in the previous run, you can keep it as it is.
-If training is not going well, you are encouraged to make wild guesses.
 """
-
 MANAGER_BASED_PPO_TUNING_FORMATTING_INSTRUCTIONS = """
 Your ppo hyperparameter tuning string should comply exactly with the previous tuning configuration.
     {'param_name_1': value_1, 'param_name_2': value_2, ...}
@@ -188,7 +189,16 @@ Your summary will be used as prior knowledge for tuning reward weights, curricul
 If you think certain codes are not relevant to learning, such as robot data or visualization, do not include them in your summary.
 
 Your summary should include:
-- Each reward term, how it is computed and its physical meaning (plus its numerical range before weight is multiplied if you deem it relevant)
+- *Each reward term, *how it is computed, *physical meaning(how it's relevant for the task), *sign and *scale of the reward weight 
+- the original weights may have been corrupted, so do not guess anything from the original weights
+- instead, use your qualitative understanding of the terms 
+- for sign of the reward weight, remember that desired behavior should give large reward value and undesired behavior should give small reward value.
+    - if you want tracking behavior and a term is defined as error/distance to target position, desired behavior would give small value. So you'll want a negative weight to invert the sign.
+    - if you want to save energy and a term is defined as energy consumption, undesired behavior would give large value. So you'll want a negative weight to invert the sign.
+- desired scale of the reward weight(low, medium, high)
+    - for main reward terms, would you want a high scale or low scale?
+    - for auxillary shaping terms(such as penalizing shaky motion, not critical to task success), would you want a high scale or low scale?
+    - If a reward term uses absolute value of torque/velocity/energy, it will be quite big compared to reward terms based on error to target. Would you want a high scale or low scale?
 - Each curriculum term, parameters, other terms that are influenced by this curriculum and its physical meaning
 - Components relevant to domain randomization
 - The overarching structure of the environment that is relevant to learning
@@ -206,12 +216,11 @@ You are a robotics and reinforcement learning expert analyzing a custom success 
 Please read the Python source code for the success metric function below, understand and provide a summary.
 
 Your summary should include:
-- The physical meaning of the success_metric and how it is computed
-- Physical meaning of auxillary fields in the returned dictionary and how they relate to the success metric
+- The physical meaning of the success_metric, e.g. value of the success metric when the task is accomplished or failed
+- Physical meaning of auxillary fields in the returned dictionary, if there are any
 
 Note that after each training, history of success_metric and auxillary_field values will be provided to you to analyse training progress.
-Provide a summary in such a way that it will be helpful for you to analyze the training progress and suggest better reward weights, curriculum schedules, etc to facilitate learning. Make your summary as rich and detailed as possible.
-
+Provide a short, concise summary in such a way that it will be helpful for you to analyze the training progress and suggest better reward weights, curriculum schedules, etc to facilitate learning. 
 """
 
 PPO_SUMMARIZATION_PROMPT = """

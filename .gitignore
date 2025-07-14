@@ -4,3 +4,7 @@ logs/
 source/isaaclab_eureka/isaaclab_eureka/test/test_outputs/*
 source/isaaclab_eureka/isaaclab_eureka/dev/texts/*
 summary/
+vis/
+vis_2/
+preference_data/
+source/isaaclab_eureka/isaaclab_eureka/visualization*

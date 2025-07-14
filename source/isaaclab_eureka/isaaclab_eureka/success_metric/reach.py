@@ -21,7 +21,7 @@ def compute_success_metric(self, env_ids):
 
     # Position similarity (Gaussian kernel)
     pos_error = torch.norm(curr_pos_w - des_pos_w, dim=1)
-    pos_sigma = 0.1  # You can adjust this
+    pos_sigma = 0.12  # You can adjust this
     position_is_close = torch.exp(-0.5 * (pos_error / pos_sigma)**2)
 
     # Desired orientation in world frame
@@ -33,14 +33,16 @@ def compute_success_metric(self, env_ids):
 
     # Orientation similarity (Gaussian kernel on quat error magnitude)
     orient_error = quat_error_magnitude(curr_quat_w, des_quat_w)
-    orient_sigma = 0.05  # You can adjust this
+    orient_sigma = 0.3  # You can adjust this
     orientation_is_close = torch.exp(-0.5 * (orient_error / orient_sigma)**2)
 
-    # Overall success metric: average of position and orientation similarities
-    success = 0.5 * (position_is_close + orientation_is_close)
+    # Overall success metric: weighted average of position and orientation closeness
+    success = 0.7 * position_is_close + 0.3 * orientation_is_close
 
     return {
         "success_metric": success.mean(),
         "position_close": position_is_close,
         "orientation_close": orientation_is_close,
+        "pos_error": pos_error.mean(),
+        "orient_error": orient_error.mean(),
     }
