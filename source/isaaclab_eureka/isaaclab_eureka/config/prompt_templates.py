@@ -200,8 +200,6 @@ Your summary should include:
     - for auxillary shaping terms(such as penalizing shaky motion, not critical to task success), would you want a high scale or low scale?
     - If a reward term uses absolute value of torque/velocity/energy, it will be quite big compared to reward terms based on error to target. Would you want a high scale or low scale?
 - Each curriculum term, parameters, other terms that are influenced by this curriculum and its physical meaning
-- Components relevant to domain randomization
-- The overarching structure of the environment that is relevant to learning
 - how different reward terms provide dense rewards to facilitate learning of the ultimate task  
 - how curriculum terms change other terms to facilitate learning of the ultimate task
 

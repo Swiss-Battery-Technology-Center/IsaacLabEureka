@@ -2,7 +2,7 @@
 # key_importer.sh
 
 # Define the path to your env file
-KEY_FILE="${ISAACLAB_PATH}/_isaaclab_eureka/api_keys/.env.api_keys"
+KEY_FILE="${ISAACLAB_PATH}/eureka/api_keys/.env.api_keys"
 
 if [ -f "$KEY_FILE" ]; then
     echo "Loading environment variables from ${KEY_FILE}"

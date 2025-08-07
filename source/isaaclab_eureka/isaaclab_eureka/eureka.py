@@ -10,7 +10,7 @@ import textwrap
 from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 from typing import Literal
 import traceback
-from isaaclab_eureka import EUREKA_ROOT_DIR
+from isaaclab_eureka import EUREKA_ROOT_DIR, ISAACLAB_ROOT_DIR
 from isaaclab_eureka.config import (
     DIRECT_WORKFLOW_INITIAL_PROMPT,
     DIRECT_WORKFLOW_TASK_PROMPT,
@@ -81,7 +81,7 @@ class Eureka:
         # logging comes first
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self._log_dir = os.path.join(
-            EUREKA_ROOT_DIR,
+            ISAACLAB_ROOT_DIR,
             "logs",
             task,
             mode, 
@@ -477,6 +477,9 @@ class Eureka:
 
         if self._task_manager._eureka_task == "reward_weight_tuning":
             smart_context_code_string = self._task_manager._context_code_string
+            # check if all functions are defined in the context code string
+            # with open(f"{self._log_dir}/source_code.txt", "w") as f:
+            #     f.write(smart_context_code_string)
             context_code_summary = self._llm_manager.get_or_generate_summary("context_code", 
                                                                          self._task_manager._rl_task_type, 
                                                                          CONTEXT_CODE_SUMMARIZATION_PROMPT,
@@ -486,6 +489,7 @@ class Eureka:
             self._llm_manager.append_user_prompt(context_code_summary)
             print("CONTEXT CODE SUMMARY TO ASSISTANT PROMPT COMPLETE")
             logging.info("CONTEXT CODE SUMMARY TO ASSISTANT PROMPT COMPLETE")
+            
 
         if self._task_manager._eureka_task == "ppo_tuning":
             ppo_code_string = self.read_ppo_source_code(self._task_manager._rl_library) 
@@ -1204,7 +1208,7 @@ class Eureka:
 
     def read_success_metric_code(self) -> str:
         """Read the success metric code and return it as a string."""
-        success_metric_path = f"/workspace/isaaclab/_isaaclab_eureka/source/isaaclab_eureka/isaaclab_eureka/success_metric/{self._task_manager._rl_task_type}.py"
+        success_metric_path = f"/workspace/isaaclab/eureka/source/isaaclab_eureka/isaaclab_eureka/success_metric/{self._task_manager._rl_task_type}.py"
 
         try:
             with open(success_metric_path, "r", encoding="utf-8") as f:
