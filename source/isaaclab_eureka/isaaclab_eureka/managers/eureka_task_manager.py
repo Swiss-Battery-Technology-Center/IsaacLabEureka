@@ -15,10 +15,10 @@ import logging
 from contextlib import nullcontext
 from datetime import datetime
 from typing import Literal
-from isaaclab_eureka import EUREKA_ROOT_DIR
+from isaaclab_eureka import EUREKA_ROOT_DIR, ISAACLAB_ROOT_DIR
 from isaaclab_eureka.utils import MuteOutput, get_freest_gpu, WrongStringFormatException, TrainingStatus, get_curriculum_term_cfg, set_curriculum_term_cfg
 from isaaclab.utils.io.yaml import dump_yaml
-import pynvml
+
 
 TEMPLATE_REWARD_STRING = """
 from {module_name} import *
@@ -726,7 +726,7 @@ class EurekaTaskManager:
             agent_cfg.max_iterations = self._max_training_iterations
 
             log_root_path = os.path.join(
-                EUREKA_ROOT_DIR, "logs", "rl_runs", "rsl_rl_eureka", agent_cfg.experiment_name, self._mode, f"seed_{self._env_seed}",datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                ISAACLAB_ROOT_DIR, "logs", "rl_runs", "rsl_rl_eureka", agent_cfg.experiment_name, self._mode, f"seed_{self._env_seed}",datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             )
             log_root_path = os.path.abspath(log_root_path)
 
@@ -786,7 +786,7 @@ class EurekaTaskManager:
             agent_cfg["params"]["config"]["device_name"] = self._device
             # specify directory for logging experiments
             log_root_path = os.path.join(
-                EUREKA_ROOT_DIR,
+                ISAACLAB_ROOT_DIR,
                 "logs",
                 "rl_runs",
                 "rl_games_eureka",
@@ -855,7 +855,7 @@ class EurekaTaskManager:
 
             # specify directory for logging experiments
             log_root_path = os.path.join(
-                EUREKA_ROOT_DIR,
+                ISAACLAB_ROOT_DIR,
                 "logs",
                 "rl_runs",
                 "skrl_eureka",
@@ -954,8 +954,9 @@ class EurekaTaskManager:
             if not os.path.isdir(task_path):
                 continue
             # Find env_cfg file (like lift_env_cfg.py, cartpole_env_cfg.py, etc.)
+            target_filename = f"{task_name}_env_cfg.py"
             for file in os.listdir(task_path):
-                if file.endswith("_env_cfg.py") and task_name in file:
+                if file == target_filename:
                     found_env_cfg = os.path.join(task_path, file)
                     mdp_module_path = f"isaaclab_tasks.manager_based.{category}.{task_name}.mdp"
                     break
@@ -989,14 +990,3 @@ class EurekaTaskManager:
         intro = "Here is environment source code\n\n"
         return intro + all_text
 
-
-def log_gpu_usage(pid: int, idx: int):
-    pynvml.nvmlInit()
-    handle = pynvml.nvmlDeviceGetHandleByIndex(0)  # or loop for all GPUs
-    processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
-
-    for proc in processes:
-        if proc.pid == pid:
-            used_mem = proc.usedGpuMemory / 1024 / 1024  # MB
-            print(f"[GPU LOG] Process {idx} (PID {pid}) using {used_mem:.2f} MB GPU memory")
-    pynvml.nvmlShutdown()

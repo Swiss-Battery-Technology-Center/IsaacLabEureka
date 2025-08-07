@@ -8,6 +8,7 @@ import re
 import traceback
 import openai
 import logging
+from isaaclab_eureka import EUREKA_ROOT_DIR, ISAACLAB_ROOT_DIR
 
 
 class LLMManager:
@@ -177,9 +178,10 @@ class LLMManager:
         Returns:
             str: The summary string.
         """
-        os.makedirs(os.path.join(eureka_root_dir, "summary"), exist_ok=True)
+        summary_dir = os.path.join(ISAACLAB_ROOT_DIR, "logs", "summary")
+        os.makedirs(summary_dir, exist_ok=True)
         filename = f"{summary_type}_summary_{identifier}.txt"
-        summary_path = os.path.join(eureka_root_dir, "summary", filename)
+        summary_path = os.path.join(summary_dir, filename)
 
         if use_cache and os.path.exists(summary_path):
             with open(summary_path, "r") as f:
