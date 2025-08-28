@@ -84,7 +84,7 @@ def _reset_idx(self, env_ids):
 ENV_ID_TO_RL_TASK = {"Isaac-Humanoid-v0": "humanoid",
                   "Isaac-Ant-v0": "ant",
                   "Isaac-Cartpole-v0": "cartpole",
-                  "Isaac-Cartpole-RGB-v0": "cartpole",
+                  "Isaac-Cartpole-RGB-v0": "cartpole_camera",
                 "Isaac-Reach-Franka-v0": "reach",
                 "Isaac-Lift-Cube-Franka-v0": "lift",
                 "Isaac-Open-Drawer-Franka-v0": "cabinet",

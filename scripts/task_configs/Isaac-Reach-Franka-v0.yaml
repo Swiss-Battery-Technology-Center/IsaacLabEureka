@@ -1,0 +1,31 @@
+resume:
+  enabled: False # True if you want to resume from a previous run, False if fresh start
+  prev_iterations_path: "" # path to desired eureka_iterations.txt file(including filename!), only for resume = True
+random_start: True # True if you want to start with random tuning, False if you want to use tuning from source code
+eureka_task: "reward_weight_tuning" # "ppo_tuning" or "reward_weight_tuning"
+
+temperature: 1
+
+# IsaacLab related arguments
+num_envs: 1024 # choose appropriate value for task, 1024 for unscrew/lift
+max_training_iterations: 800 # RL learning iterations, 800 for lift, 1300 for unscrew
+feedback_subsampling: 10 # adaptive to max learning iterations, 10 will sample 10 times during a full RL training, 20 will sample 20 times
+rl_library: "rsl_rl" # "rsl_rl" , "skrl" supported
+video: False
+# your choice of parameters to tune(reward/curriculum terms or ppo hyperparameters)
+
+# for reward/curriculum tuning, unscrew
+parameters_to_tune: 
+  - 'reward.end_effector_position_tracking.weight'
+  - 'reward.end_effector_position_tracking_fine_grained.weight'
+  - 'reward.end_effector_orientation_tracking.weight'
+  - 'reward.action_rate.weight'
+  - 'reward.joint_vel.weight'
+
+
+
+# Temporary fix, set True if you want no llm, one process, one training, use tuning from source code
+# just like reinforcement_learning/rsl_rl/train.py
+# still records training result, tuning config, Eureka metrics, etc
+
+env_type: "manager_based" # "manager_based" or "direct"

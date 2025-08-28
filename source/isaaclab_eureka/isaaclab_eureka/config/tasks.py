@@ -63,6 +63,12 @@ TASKS_CFG = {
         "success_metric_to_win":1,
         "success_metric_tolerance": 0.001,
     },
+    "Isaac-Ant-v0": {
+        "description": "Ant robot tries to reach target position",
+        "success_metric": "0",
+        "success_metric_to_win": 1,
+        "success_metric_tolerance": 0.01,
+    },
 
 }
 

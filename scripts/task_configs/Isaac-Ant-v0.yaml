@@ -1,4 +1,4 @@
-task: "Isaac-Lift-Cube-Franka-v0" # "SBTC-Lift-Cube-Franka-OSC-v0" "SBTC-Unscrew-Franka-OSC-v0"
+task: "Isaac-Ant-v0" # "SBTC-Lift-Cube-Franka-OSC-v0" "SBTC-Unscrew-Franka-OSC-v0"
 
 # eureka parallel runs for evolutionary search, at each iteration
 # under the hood it runs sequentially
@@ -21,7 +21,7 @@ use_cache: False # True to use cached summary of env source code, False to read 
 
 # IsaacLab related arguments
 num_envs: 1024 # choose appropriate value for task, 1024 for unscrew/lift
-max_training_iterations: 1200 # RL learning iterations, 800 for lift, 1300 for unscrew
+max_training_iterations: 1000 # RL learning iterations, 800 for lift, 1300 for unscrew
 feedback_subsampling: 10 # adaptive to max learning iterations, 10 will sample 10 times during a full RL training, 20 will sample 20 times
 rl_library: "rsl_rl" # "rsl_rl" , "skrl" supported
 video: False
@@ -29,12 +29,14 @@ video: False
 
 # for reward/curriculum tuning, unscrew
 parameters_to_tune: 
-  - 'reward.reaching_object.weight'
-  - 'reward.lifting_object.weight'
-  - 'reward.object_goal_tracking.weight'
-  - 'reward.object_goal_tracking_fine_grained.weight'
-  - 'reward.action_rate.weight'
-  - 'reward.joint_vel.weight'
+  - 'reward.progress.weight'
+  - 'reward.alive.weight'
+  - 'reward.upright.weight'
+  - 'reward.move_to_target.weight'
+  - 'reward.action_l2.weight'
+  - 'reward.energy.weight'
+  - 'reward.joint_pos_limits.weight'
+
 
 
 
