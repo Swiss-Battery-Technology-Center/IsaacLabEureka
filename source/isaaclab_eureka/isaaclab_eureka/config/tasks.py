@@ -27,8 +27,8 @@ TASKS_CFG = {
         "success_metric_to_win": 1.0,
         "success_metric_tolerance": 0.01,
     },
-    "Isaac-Velocity-Flat-Anymal-B-v0": {
-        "description": "Track a velocity command on flat terrain with the Anymal B robot",
+    "Isaac-Velocity-Rough-Anymal-B-v0": {
+        "description": "Track a velocity command on rough terrain with the Anymal B robot",
         "success_metric": "0",
         "success_metric_to_win": 1.0,
         "success_metric_tolerance": 0.01,

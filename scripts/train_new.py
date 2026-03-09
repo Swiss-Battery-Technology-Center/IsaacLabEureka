@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright (c) 2024, The Isaac Lab Project Developers.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -7,128 +8,103 @@ import yaml
 from isaaclab_eureka.eureka import Eureka
 
 HERE = os.path.dirname(__file__)
-CONFIG_PATH = os.path.join(HERE, "eureka_config.yaml")
+DEFAULT_CONFIG_PATH = os.path.join(HERE, "eureka_config.yaml")
 TASK_CFG_DIR = os.path.join(HERE, "task_configs")
 
-# The only keys we expect to change per run (run config should win on these)
-RUN_KEYS = {
+# Keys that must *not* be overridden by task YAML (wrapper controls these)
+PROTECTED_RUN_KEYS = {
     "task",
+    "seed",
     "num_parallel_runs",
     "mode",
     "max_eureka_iterations",
-    "env_seed",
     "gpt_model",
     "temperature",
     "use_cache",
+    "resume",
+    "random_start",
+    "video",
+    "rl_library",
+    "env_type",
+    "device",
 }
 
-def load_yaml(path):
-    if not os.path.isfile(path):
+def load_yaml(path: str) -> dict:
+    if not (path and os.path.isfile(path)):
         return {}
     with open(path, "r") as f:
         return yaml.safe_load(f) or {}
 
-def deep_update(dst, src):
-    """Recursively update dict dst with src (in place) and return dst."""
-    for k, v in src.items():
+def deep_update(dst: dict, src: dict) -> dict:
+    for k, v in (src or {}).items():
         if isinstance(v, dict) and isinstance(dst.get(k), dict):
             deep_update(dst[k], v)
         else:
             dst[k] = v
     return dst
 
-def overlay_keys(dst, src, keys):
-    """Update only selected keys from src into dst."""
-    for k in keys:
-        if k in src:
-            dst[k] = src[k]
-    return dst
+def without_keys(d: dict, keys: set) -> dict:
+    """Shallow copy of d without keys in `keys`."""
+    return {k: v for k, v in (d or {}).items() if k not in keys}
 
-def args_to_dict(args_ns):
-    d = vars(args_ns).copy()
-    # argparse may set lists/strings; normalize if needed
-    return d
+def build_config(base_cfg_path: str) -> dict:
+    # 1) Load wrapper-written base config (run-time knobs live here)
+    base = load_yaml(base_cfg_path)
+    if not base:
+        raise ValueError(f"Config not found or empty: {base_cfg_path}")
 
-def dict_to_namespace(d):
-    return argparse.Namespace(**d)
-
-def build_config(args_cli):
-    """
-    Merge order:
-      1) start from CLI defaults
-      2) overlay TASK config (stable, task-specific)
-      3) overlay RUN config but ONLY for RUN_KEYS
-    """
-    cli_dict = args_to_dict(args_cli)
-    run_cfg = load_yaml(CONFIG_PATH)
-
-    # Task name comes from run config if present, else CLI
-    task_name = run_cfg.get("task", cli_dict.get("task"))
+    task_name = base.get("task")
     if not task_name:
-        raise ValueError("No task specified. Set 'task' in eureka_config.yaml or via --task.")
+        raise ValueError("Missing 'task' in eureka_config.yaml (wrapper should set this).")
 
-    # Load task config if exists
+    # 2) Overlay task-only fields from task YAML (cannot override protected run keys)
     task_cfg_path = os.path.join(TASK_CFG_DIR, f"{task_name}.yaml")
     task_cfg = load_yaml(task_cfg_path)
-
-    # 1) CLI defaults → 2) task overrides → 3) run overrides (only RUN_KEYS)
-    merged = {}
-    deep_update(merged, cli_dict)
-    deep_update(merged, task_cfg)
-    overlay_keys(merged, cli_dict, RUN_KEYS)
+    merged = dict(base)
+    deep_update(merged, without_keys(task_cfg, PROTECTED_RUN_KEYS))
 
     # Normalize parameters_to_tune to a list
     ptt = merged.get("parameters_to_tune")
     if isinstance(ptt, str):
         merged["parameters_to_tune"] = [ptt]
 
-    return dict_to_namespace(merged)
+    return merged
 
-def main(args_cli):
-    cfg = build_config(args_cli)
-
-    eureka = Eureka(
-        task=cfg.task,
-        rl_library=cfg.rl_library,
-        num_parallel_runs=cfg.num_parallel_runs,
-        device=cfg.device,
-        env_seed=cfg.env_seed,
-        max_training_iterations=cfg.max_training_iterations,
-        feedback_subsampling=cfg.feedback_subsampling,
-        temperature=cfg.temperature,
-        gpt_model=cfg.gpt_model,
-        env_type=cfg.env_type,
-        eureka_task=cfg.eureka_task,
-        parameters_to_tune=cfg.parameters_to_tune,
-        num_envs=cfg.num_envs,
-        resume=getattr(cfg, "resume", None),
-        use_cache=getattr(cfg, "use_cache", True),
-        video=getattr(cfg, "video", False),
-        random_start=getattr(cfg, "random_start", False),
-        mode=getattr(cfg, "mode", "eureka"),
+def main():
+    parser = argparse.ArgumentParser(
+        description="Train an RL agent with Eureka. "
+                    "Wrapper should write all run keys into eureka_config.yaml."
     )
-    eureka.run(max_eureka_iterations=cfg.max_eureka_iterations)
+    parser.add_argument("--config", type=str, default=DEFAULT_CONFIG_PATH,
+                        help="Path to eureka_config.yaml (defaults to scripts/eureka_config.yaml).")
+    args = parser.parse_args()
+
+    cfg = build_config(args.config)
+
+    # Construct Eureka with the merged config.
+    # NOTE: Eureka now expects `seed`, not `env_seed`.
+    eureka = Eureka(
+        task=cfg["task"],
+        rl_library=cfg.get("rl_library", "rsl_rl"),
+        num_parallel_runs=cfg.get("num_parallel_runs", 1),
+        device=cfg.get("device", "cuda"),
+        env_seed=cfg.get("seed", 42),
+        max_training_iterations=cfg.get("max_training_iterations", 100),
+        feedback_subsampling=cfg.get("feedback_subsampling", 10),
+        temperature=cfg.get("temperature", 1.0),
+        gpt_model=cfg.get("gpt_model", "gpt-4"),
+        env_type=cfg.get("env_type", ""),
+        eureka_task=cfg.get("eureka_task", "reward_weight_tuning"),
+        parameters_to_tune=cfg.get("parameters_to_tune", []),
+        num_envs=cfg.get("num_envs", 256),
+        resume=cfg.get("resume", None),
+        use_cache=cfg.get("use_cache", True),
+        video=cfg.get("video", False),
+        random_start=cfg.get("random_start", False),
+        mode=cfg.get("mode", "eureka"),
+    )
+
+    eureka.run(max_eureka_iterations=cfg.get("max_eureka_iterations", 5))
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train an RL agent with Eureka.")
-    parser.add_argument("--task", type=str, default="Isaac-Cartpole-Direct-v0")
-    parser.add_argument("--num_parallel_runs", type=int, default=1)
-    parser.add_argument("--device", type=str, default="cuda")
-    parser.add_argument("--env_seed", type=int, default=42)
-    parser.add_argument("--max_eureka_iterations", type=int, default=5)
-    parser.add_argument("--max_training_iterations", type=int, default=100)
-    parser.add_argument("--feedback_subsampling", type=int, default=10)
-    parser.add_argument("--temperature", type=float, default=1.0)
-    parser.add_argument("--gpt_model", type=str, default="gpt-4")
-    parser.add_argument("--rl_library", type=str, default="rsl_rl", choices=["rsl_rl", "rl_games", "skrl"])
-    parser.add_argument("--env_type", type=str, default="")
-    parser.add_argument("--eureka_task", type=str, default="reward_weight_tuning")
-    parser.add_argument("--parameters_to_tune", nargs="+", default=[])
-    parser.add_argument("--num_envs", type=int, default=256)
-    parser.add_argument("--resume", type=str, default=None)
-    parser.add_argument("--use_cache", action="store_true")
-    parser.add_argument("--video", action="store_true")
-    parser.add_argument("--random_start", action="store_true")
-    parser.add_argument("--mode", type=str, default="eureka")
-    args_cli = parser.parse_args()
-    main(args_cli)
+    main()

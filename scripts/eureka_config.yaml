@@ -1,7 +1,16 @@
-mode : "eureka" # "eureka", "random_signed", "random_unsigned" or "single_run_gt" or "single_run_sparse"
-num_parallel_runs: 5
-max_eureka_iterations: 5
-env_seed: 42
 gpt_model: "openai/gpt-oss-20b:free"
 temperature: 1
-use_cache: true
+use_cache: False
+
+resume:
+  enabled: False # True if you want to resume from a previous run, False if fresh start
+  prev_iterations_path: "" # path to desired eureka_iterations.txt file(including filename!), only for resume = True
+random_start: True # True if you want to start with random tuning, False if you want to use tuning from source code
+
+eureka_task: "reward_weight_tuning" # "ppo_tuning" or "reward_weight_tuning"
+
+feedback_subsampling: 10 # adaptive to max learning iterations, 10 will sample 10 times during a full RL training, 20 will sample 20 times
+rl_library: "rsl_rl" # "rsl_rl" , "skrl" supported
+video: False
+
+env_type: "manager_based" # "manager_based" or "direct"

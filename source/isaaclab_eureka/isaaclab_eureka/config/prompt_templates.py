@@ -189,23 +189,14 @@ Your summary will be used as prior knowledge for tuning reward weights, curricul
 If you think certain codes are not relevant to learning, such as robot data or visualization, do not include them in your summary.
 
 Your summary should include:
-- *Each reward term, *how it is computed, *physical meaning(how it's relevant for the task), *sign and *scale of the reward weight 
-- the original weights may have been corrupted, so do not guess anything from the original weights
+- *Each reward term, *how it is computed, *physical meaning(how it's relevant for the task)
 - instead, use your qualitative understanding of the terms 
-- for sign of the reward weight, remember that desired behavior should give large reward value and undesired behavior should give small reward value.
-    - if you want tracking behavior and a term is defined as error/distance to target position, desired behavior would give small value. So you'll want a negative weight to invert the sign.
-    - if you want to save energy and a term is defined as energy consumption, undesired behavior would give large value. So you'll want a negative weight to invert the sign.
-- desired scale of the reward weight(low, medium, high)
-    - for main reward terms, would you want a high scale or low scale?
-    - for auxillary shaping terms(such as penalizing shaky motion, not critical to task success), would you want a high scale or low scale?
-    - If a reward term uses absolute value of torque/velocity/energy, it will be quite big compared to reward terms based on error to target. Would you want a high scale or low scale?
+- think about appropriate sign of each reward term. Does this term represent desired or undesired behavior? 
 - Each curriculum term, parameters, other terms that are influenced by this curriculum and its physical meaning
 - how different reward terms provide dense rewards to facilitate learning of the ultimate task  
 - how curriculum terms change other terms to facilitate learning of the ultimate task
 
 Additionally, include anything else you think is important for understanding and tuning the environment.
-
-Do not include weight of each reward term in your summary, because the weights will be tuned multiple times. It is meaningless to remember the initial weights.
 """
 
 SUCCESS_METRIC_SUMMARIZATION_PROMPT = """

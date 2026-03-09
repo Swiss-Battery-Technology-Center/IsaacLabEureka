@@ -88,7 +88,7 @@ ENV_ID_TO_RL_TASK = {"Isaac-Humanoid-v0": "humanoid",
                 "Isaac-Reach-Franka-v0": "reach",
                 "Isaac-Lift-Cube-Franka-v0": "lift",
                 "Isaac-Open-Drawer-Franka-v0": "cabinet",
-                "Isaac-Velocity-Flat-Anymal-B-v0": "velocity"}
+                "Isaac-Velocity-Rough-Anymal-B-v0": "velocity"}
 
 class EurekaTaskManager:
     """Manages the set-up and training of a task using LLM-generated reward functions.
@@ -726,7 +726,7 @@ class EurekaTaskManager:
             agent_cfg.max_iterations = self._max_training_iterations
 
             log_root_path = os.path.join(
-                ISAACLAB_ROOT_DIR, "logs", "rl_runs", "rsl_rl_eureka", agent_cfg.experiment_name, self._mode, f"seed_{self._env_seed}",datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                ISAACLAB_ROOT_DIR, "logs", "policies", agent_cfg.experiment_name, self._mode, f"seed_{self._env_seed}", datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             )
             log_root_path = os.path.abspath(log_root_path)
 
