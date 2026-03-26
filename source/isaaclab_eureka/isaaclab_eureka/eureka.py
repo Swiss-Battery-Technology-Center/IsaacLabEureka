@@ -3,11 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import datetime
-import numpy as np
 import os
-from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 from typing import Literal
 
+# we import this here to avoid GLIBCXX_3.4.30 error in Isaac Sim 5.1
+from isaaclab.app import AppLauncher
 from isaaclab_eureka import EUREKA_ROOT_DIR
 from isaaclab_eureka.config import (
     DIRECT_WORKFLOW_INITIAL_PROMPT,
@@ -89,6 +89,10 @@ class Eureka:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self._log_dir = os.path.join(EUREKA_ROOT_DIR, "logs", "eureka", task, timestamp)
         os.makedirs(self._log_dir)
+
+        # We import here because doing this before launching Kit causes GLIBCXX errors
+        from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
+
         self._tensorboard_writer = TensorboardSummaryWriter(log_dir=self._log_dir, flush_secs=10)
 
     def run(self, max_eureka_iterations: int):
@@ -97,6 +101,9 @@ class Eureka:
         Args:
             max_eureka_iterations: The maximum number of Eureka iterations to run.
         """
+        # We import here because doing this before launching Kit causes GCC_12.0 errors
+        import numpy as np
+
         # Initial prompts
         user_prompt = DIRECT_WORKFLOW_TASK_PROMPT.format(
             task_description=self._task_description,
@@ -192,6 +199,9 @@ class Eureka:
         Returns:
             A tuple containing the feedback string, the maximum of the success metric, and the correlation between the oracle and GPT rewards.
         """
+        # We import here because doing this before launching Kit causes GCC_12.0 errors
+        import numpy as np
+
         data = load_tensorboard_logs(log_dir)
         # Compute correlation between the oracle and GPT rewards
         eureka_rewards = np.array(

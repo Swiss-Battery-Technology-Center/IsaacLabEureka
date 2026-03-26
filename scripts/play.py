@@ -7,7 +7,7 @@
 import argparse
 import math
 import torch
-import os
+
 from rl_games.common.player import BasePlayer
 
 from isaaclab_eureka.utils import get_freest_gpu
@@ -33,8 +33,8 @@ def main(args_cli):
     simulation_app = app_launcher.app
 
     import gymnasium as gym
-
     import isaaclab_tasks  # noqa: F401
+    import torch
     from isaaclab.envs import DirectRLEnvCfg
     from isaaclab_tasks.utils import parse_env_cfg
 
@@ -47,9 +47,8 @@ def main(args_cli):
     from isaaclab_tasks.utils.parse_cfg import load_cfg_from_registry
 
     if args_cli.rl_library == "rsl_rl":
-        from rsl_rl.runners import OnPolicyRunner
-
         from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
+        from rsl_rl.runners import OnPolicyRunner
 
         agent_cfg: RslRlOnPolicyRunnerCfg = load_cfg_from_registry(args_cli.task, "rsl_rl_cfg_entry_point")
         agent_cfg.device = device
@@ -92,7 +91,7 @@ def main(args_cli):
         policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
 
         # reset environment
-        obs, _ = env.get_observations()
+        obs = env.get_observations()
         # simulate environment
         while simulation_app.is_running():
             # run everything in inference mode
@@ -103,11 +102,10 @@ def main(args_cli):
                 obs, _, _, _ = env.step(actions)
 
     elif args_cli.rl_library == "rl_games":
+        from isaaclab_rl.rl_games import RlGamesGpuEnv, RlGamesVecEnvWrapper
         from rl_games.common import env_configurations, vecenv
         from rl_games.common.algo_observer import IsaacAlgoObserver
         from rl_games.torch_runner import Runner
-
-        from isaaclab_rl.rl_games import RlGamesGpuEnv, RlGamesVecEnvWrapper
 
         agent_cfg = load_cfg_from_registry(args_cli.task, "rl_games_cfg_entry_point")
         
@@ -160,6 +158,9 @@ def main(args_cli):
         runner.load(agent_cfg)
 
         # obtain the agent from the runner
+        # we import this here to avoid GLIBC errors with Isaac Sim 5.0 in conda
+        from rl_games.common.player import BasePlayer
+
         agent: BasePlayer = runner.create_player()
         agent.restore(checkpoint)
         agent.reset()
